@@ -2,6 +2,8 @@
 
 流水线：[Desktop builds](https://github.com/Found-L/codex-switch/actions/workflows/release.yml)。发布任务依赖 Windows、macOS arm64 和 macOS x86_64 三个构建全部成功。
 
+v0.3.0 实现提交 `2209fe6` 的 [三端 CI 已全部通过](https://github.com/Found-L/codex-switch/actions/runs/41982563204)。Mac 两个架构均完成冻结 GUI 的真实 Keychain/helper 自检，以及实际 DMG 安装、Key 更新、zsh PATH 和卸载往返。当前生成包为 ad-hoc 签名、未公证。
+
 ## 通用与 Windows
 
 - 28 项服务、凭据管道与终端集成测试：格式/编码保留、失败回滚、并发配置保护、模型与 auth.json 保留、系统凭据隔离读写、CLI 安装幂等、shell 内容保留、无关同名命令保护及写入失败回滚。Mac 跳过 1 项 Windows 路径专用测试。
