@@ -14,7 +14,7 @@ from codex_switch.credentials import default_credentials
 def main():
     dmg = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="codex-switch-install-") as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve()
         mount = root / "volume"
         mount.mkdir()
         mounted = False
