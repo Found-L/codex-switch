@@ -62,6 +62,7 @@ app = BUNDLE(coll, name='Codex Switch.app', icon={str(ROOT / "assets/codex-switc
     run(*signing, "--entitlements", ROOT / "installer/macos-entitlements.plist", app)
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
     run(sys.executable, "scripts/gui_smoke.py", contents / "MacOS/Codex Switch")
+    run(sys.executable, "scripts/gui_smoke.py", contents / "MacOS/Codex Switch", "--native-keychain")
     run(sys.executable, "scripts/smoke.py", helper)
     release = ROOT / "release"
     release.mkdir(exist_ok=True)

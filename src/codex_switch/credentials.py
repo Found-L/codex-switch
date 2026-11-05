@@ -43,7 +43,8 @@ class HelperCredentials:
     def _call(self, operation, key=None):
         arguments = [self.executable, *self.prefix, "--codex-home", str(self.home), "vault-" + operation]
         result = subprocess.run(arguments, input=key + "\n" if key is not None else None,
-                                capture_output=True, text=True, encoding="utf-8", timeout=20)
+                                capture_output=True, text=True, encoding="utf-8", timeout=20,
+                                env=dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1"))
         if result.returncode:
             raise SwitchError("Cannot access macOS Keychain through the helper. Unlock the login keychain and allow codex-switch if prompted.")
         try:

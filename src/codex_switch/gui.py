@@ -476,11 +476,14 @@ def run(home=None):
     server.close()
 
 
-def self_test(report):
+def self_test(report, native=False):
     """Run the real QML scene offscreen using an isolated config and fake key store."""
     result = {"ok": False}
     model = None
+    native_service = None
     try:
+        if native and (sys.platform != "darwin" or os.environ.get("CODEX_SWITCH_NO_KEYCHAIN_UI") != "1"):
+            raise RuntimeError("Native Keychain GUI smoke is restricted to noninteractive macOS tests.")
         app = application(testing=True)
 
         class MemoryCredentials:
@@ -490,7 +493,12 @@ def self_test(report):
             def delete(self): self.value = None
 
         with tempfile.TemporaryDirectory(prefix="codex-switch-qt-") as home:
-            service = SwitchService(Path(home), credentials=MemoryCredentials(), track=False)
+            service = SwitchService(Path(home), credentials=None if native else MemoryCredentials(), track=False)
+            if native:
+                from .credentials import HelperCredentials
+                if not isinstance(service.credentials, HelperCredentials):
+                    raise RuntimeError("Packaged GUI must delegate Keychain access to its helper.")
+                native_service = service
             model = Bridge(service, testing=True)
             engine, window = load_scene(model)
             window.show()
@@ -554,6 +562,7 @@ def self_test(report):
             result = {"ok": True, "version": __version__, "qt": pyside_version,
                       "persistent_controls": True, "async_switching": True,
                       "page_transition_no_overlap": True,
+                      "native_keychain": native,
                       "mini_window": True, "single_instance": True, "setup_entry_count": 1}
             model.shutdown()
             window.close()
@@ -566,5 +575,10 @@ def self_test(report):
     finally:
         if model:
             model.shutdown()
+        if native_service:
+            try:
+                native_service.remove_api()
+            except Exception as error:
+                result = {"ok": False, "error_type": type(error).__name__, "phase": "native-cleanup"}
     Path(report).write_text(json.dumps(result), encoding="utf-8")
     return 0 if result["ok"] else 1
