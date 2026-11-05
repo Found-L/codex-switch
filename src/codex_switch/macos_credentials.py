@@ -47,6 +47,14 @@ class MacOSCredentials:
         }.items():
             function = getattr(self.security, name)
             function.argtypes, function.restype = args, ct.c_int32
+        if os.environ.get("CODEX_SWITCH_NO_KEYCHAIN_UI") == "1":
+            function = self.security.SecKeychainSetUserInteractionAllowed
+            function.argtypes, function.restype = [ct.c_ubyte], ct.c_int32
+            self._check(function(0))
+
+    def _trace(self, operation):
+        if os.environ.get("CODEX_SWITCH_NO_KEYCHAIN_UI") == "1" and sys.stderr is not None:
+            print("Keychain integration: " + operation, file=sys.stderr, flush=True)
 
     def _constant(self, name):
         return ct.c_void_p.in_dll(self.security, name).value
@@ -93,6 +101,7 @@ class MacOSCredentials:
     def _access(self, owned):
         applications = []
         for path in self.trusted_paths:
+            self._trace("authorize binary")
             application = ct.c_void_p()
             self._check(self.security.SecTrustedApplicationCreateFromPath(path.encode("utf-8"), ct.byref(application)))
             owned.append(application.value)
@@ -103,11 +112,13 @@ class MacOSCredentials:
             raise SwitchError("Cannot authorize the application and credential helper.")
         owned.append(array)
         access = ct.c_void_p()
+        self._trace("create access list")
         self._check(self.security.SecAccessCreate(self._string("Codex Switch OpenAI API", owned), array, ct.byref(access)))
         owned.append(access.value)
         return access.value
 
     def read(self):
+        self._trace("read")
         owned = []
         result = ct.c_void_p()
         try:
@@ -127,6 +138,7 @@ class MacOSCredentials:
             self._release(owned)
 
     def write(self, key):
+        self._trace("write")
         data = key.encode("utf-8")
         if not data or len(data) > 2560:
             raise SwitchError("API key length is invalid.")
@@ -140,8 +152,10 @@ class MacOSCredentials:
             query = self._dictionary(fields, owned)
             updates = {"kSecValueData": value, "kSecAttrAccess": self._access(owned)}
             updated = self._dictionary(updates, owned)
+            self._trace("update item")
             status = self.security.SecItemUpdate(query, updated)
             if status == self.NOT_FOUND:
+                self._trace("add item")
                 status = self.security.SecItemAdd(self._dictionary({**fields, **updates}, owned), None)
                 if status == self.DUPLICATE:
                     status = self.security.SecItemUpdate(query, updated)
@@ -150,6 +164,7 @@ class MacOSCredentials:
             self._release(owned)
 
     def delete(self):
+        self._trace("delete")
         owned = []
         try:
             status = self.security.SecItemDelete(self._dictionary(self._fields(owned), owned))

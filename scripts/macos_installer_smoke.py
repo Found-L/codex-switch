@@ -31,7 +31,7 @@ def main():
             result = subprocess.run(list(map(str, args)), input=stdin, capture_output=True,
                                     text=True, encoding="utf-8", env=environment, timeout=60)
             if result.returncode:
-                raise RuntimeError("macOS installer smoke command failed: " + str(args[0]))
+                raise RuntimeError("macOS installer smoke command failed: " + str(args[0]) + "; " + result.stderr[:600])
             return result.stdout
 
         try:

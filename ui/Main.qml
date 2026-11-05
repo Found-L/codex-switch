@@ -296,7 +296,7 @@ Window {
                         Rectangle {
                             required property string modelData
                             width: parent.width; height: bridge.isMac ? 46 : 53; radius: 12; color: "white"; border.color: "#e2e5ef"
-                            Text { x: 13; anchors.verticalCenter: parent.verticalCenter; text: modelData; color: "#62677d"; font.family: "Consolas"; font.pixelSize: 11 }
+                            Text { x: 13; anchors.verticalCenter: parent.verticalCenter; text: modelData; color: "#62677d"; font.family: bridge.isMac ? "Menlo" : "Consolas"; font.pixelSize: 11 }
                             Text { anchors.right: parent.right; anchors.rightMargin: 13; anchors.verticalCenter: parent.verticalCenter; text: root.t("复制", "Copy"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.copyText(modelData) } }
                         }
                     }

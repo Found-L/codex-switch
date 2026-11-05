@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-smoke-") as temporary:
                                 input=stdin, text=True, encoding="utf-8", capture_output=True,
                                 env=environment, timeout=30)
         if result.returncode:
-            raise RuntimeError("Packaged CLI failed: " + " ".join(arguments))
+            raise RuntimeError("Packaged CLI failed: " + " ".join(arguments) + "; " + result.stderr[:600])
         return result.stdout
 
     try:
