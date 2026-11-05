@@ -1,0 +1,109 @@
+import argparse
+import getpass
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+from . import __version__
+from .errors import SwitchError
+from .service import SwitchService, registered_homes
+
+
+def main(argv=None):
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(description="Switch Codex account/API configuration without model requests.")
+    parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument("--codex-home", type=Path, help="Codex configuration directory (default: CODEX_HOME or ~/.codex)")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for command in ("status", "doctor"):
+        commands.add_parser(command).add_argument("--json", action="store_true")
+    commands.add_parser("use").add_argument("mode", choices=("api", "account"))
+    for mode in ("api", "account"):
+        commands.add_parser(mode, help="Shortcut for use " + mode)
+    setup = commands.add_parser("setup", help="Securely enter an API key; never pass it as a command argument")
+    setup.add_argument("--use", action="store_true", help="Switch to API after setup")
+    setup.add_argument("--key-stdin", action="store_true", help="Read key from redirected stdin (not shell history)")
+    setup.add_argument("--model", default="gpt-6.1-sol", help="Initial model only if no model is configured")
+    commands.add_parser("gui", help="Open the desktop application")
+    commands.add_parser("credential", help=argparse.SUPPRESS)
+    commands.add_parser("uninstall-cleanup", help=argparse.SUPPRESS)
+    remove = commands.add_parser("remove-api", help="Remove this tool's provider/key; preserve Codex account login")
+    remove.add_argument("--yes", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "gui":
+            if getattr(sys, "frozen", False):
+                executable = Path(sys.executable).with_name("CodexSwitch.exe")
+                command = [str(executable)]
+                if args.codex_home:
+                    command += ["--codex-home", str(args.codex_home)]
+                subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                from .gui import run
+                run(args.codex_home)
+            return 0
+        if args.command == "uninstall-cleanup":
+            for home in set([SwitchService(args.codex_home).home, *registered_homes()]):
+                SwitchService(home).remove_api()
+            return 0
+        service = SwitchService(args.codex_home)
+        if args.command == "credential":
+            if sys.stdout.isatty():
+                raise SwitchError("Internal credential helper; output to an interactive terminal is disabled.")
+            print(service.credential(), flush=True)
+            return 0
+        if args.command in ("status", "doctor"):
+            result = service.status()
+            if args.command == "doctor":
+                result["codex_cli_found"] = bool(shutil.which("codex"))
+                result["helper_installed"] = Path(service.helper[0]).is_file()
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print("Current configuration: " + result["mode"] + " (" + result["provider"] + ")")
+                print("API configured: " + ("yes" if result["api_ready"] else "no"))
+                print("Codex home: " + result["codex_home"])
+                if result["profile_override"]:
+                    print("Warning: selected profile overrides model_provider.")
+                if args.command == "doctor":
+                    print("Codex CLI: " + ("found" if result["codex_cli_found"] else "not found; desktop-only use is possible"))
+            return 0
+        if args.command == "setup":
+            if args.key_stdin:
+                if sys.stdin.isatty():
+                    raise SwitchError("--key-stdin requires redirected input.")
+                key = sys.stdin.read(2561)
+            else:
+                if not sys.stdin.isatty():
+                    raise SwitchError("Use --key-stdin for redirected input.")
+                key = getpass.getpass("OpenAI API key (hidden): ")
+            service.setup(key, args.model)
+            print("API key saved in Windows Credential Manager.")
+            if args.use:
+                service.use("api")
+                print("Switched to API. Start a new Codex chat; existing chats keep their provider.")
+            return 0
+        if args.command == "remove-api":
+            if not args.yes and (not sys.stdin.isatty() or input("Remove managed API provider/key? [y/N] ").lower() != "y"):
+                return 1
+            service.remove_api()
+            print("Managed API provider/key removed; Codex account login preserved.")
+            return 0
+        mode = args.mode if args.command == "use" else args.command
+        service.use(mode)
+        print("Configuration: " + mode + ". Start a new Codex chat; existing chats keep their provider.")
+        return 0
+    except SwitchError as error:
+        print("Error: " + str(error), file=sys.stderr)
+    except (OSError, ValueError, TypeError):
+        print("Error: Local configuration operation failed; no credential contents are displayed.", file=sys.stderr)
+    except KeyboardInterrupt:
+        print("Cancelled.", file=sys.stderr)
+    except Exception:
+        print("Error: Operation failed. Repair the local configuration or reinstall Codex Switch.", file=sys.stderr)
+    return 1
