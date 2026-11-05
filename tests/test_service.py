@@ -43,6 +43,7 @@ class ServiceTests(unittest.TestCase):
         state = self.service.status()
         self.assertEqual(state["mode"], "account")
         self.assertTrue(state["api_ready"])
+        self.assertNotIn("model", parse(self.service.config.read()))
         for path in self.home.rglob("*"):
             if path.is_file():
                 self.assertNotIn(b"fixture-secret", path.read_bytes())
@@ -63,7 +64,7 @@ class ServiceTests(unittest.TestCase):
         self.write_config(raw)
         auth = self.home / "auth.json"
         auth.write_bytes(b"original-account-sentinel")
-        self.service.setup("fixture-secret", "ignored-new-model")
+        self.service.setup("fixture-secret")
         configured = self.service.config.read()
         self.assertTrue(configured.startswith(b"\xef\xbb\xbf"))
         self.assertIn('# 中文说明\r\n'.encode(), configured)

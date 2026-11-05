@@ -1,12 +1,13 @@
-Codex Switch 首个 Windows 10/11 x64 版本：
+## Codex Switch v0.2.0
 
-- 中文 / English 图形界面，首次引导配置 API Key。
-- 账号 / OpenAI API 切换，保留现有 Codex 账号登录。
-- Windows 凭据管理器存储 Key，不写入配置文件。
-- `codex-switch setup/status/use/doctor/gui` 终端命令。
-- 当前用户安装器、可选 PATH 和桌面入口；另附便携 ZIP。
-- 修改前备份配置，卸载时安全移除本工具的提供商和凭据。
+- 重做为 Qt Quick 界面：常驻控件、异步保存、滑块与淡入淡出过渡，静默刷新不再闪动保存状态。
+- 新增迷你窗口、Windows 系统托盘、托盘菜单切换与重复启动唤回。关闭窗口收进托盘，右键菜单可退出。
+- 统一原创多尺寸图标、安装器和快捷方式的 Windows 应用标识。
+- API Key 配置整合到同一面板，移除「初始模型」字段及 CLI `setup --model`；保留原模型配置，模型和推理档位在 Codex 中选择。
+- 终端命令继续可用。界面运行库随包附带，无需安装 Python。
 
-首次使用请先安装 Codex，账号模式需先登录。窗口表示全局配置来源；切换后新建会话，已有聊天保持原来源，缓存菜单必要时重载客户端。实际模型权限与计费以 OpenAI 账户为准。
+快捷键：Ctrl+M 收进托盘，Ctrl+Shift+M 切换小窗，Ctrl+Q 退出。托盘图标可能藏在 Windows 任务栏的隐藏图标中。
 
-Download the **setup.exe** for installation, or the **portable.zip** for portable use. No Python installation is needed. Binaries are unsigned; checksums are included. The tool performs local setup only and does not verify access by sending paid model requests.
+切换后请新建 Codex 会话，已有会话保留原来源。API 权限与额度以自己的 OpenAI 项目为准；不发送付费请求验证。
+
+Persistent Qt Quick UI with animated transitions, asynchronous configuration changes, a mini window, native Windows tray switching and single-instance activation. New application icon throughout. API setup preserves model settings; choose models in Codex. Windows 10/11 x64.

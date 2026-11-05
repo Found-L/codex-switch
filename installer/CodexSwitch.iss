@@ -1,5 +1,5 @@
 ﻿#ifndef AppVersion
-  #define AppVersion "0.1.2"
+  #define AppVersion "0.2.0"
 #endif
 [Setup]
 AppId={{4805AB72-7459-4E65-96D9-CB907342A82F}
@@ -19,6 +19,7 @@ OutputBaseFilename=CodexSwitch-{#AppVersion}-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\codex-switch.ico
 ChangesEnvironment=yes
 UninstallDisplayIcon={app}\CodexSwitch.exe
 LicenseFile=..\LICENSE
@@ -35,8 +36,8 @@ Name: "addtopath"; Description: "Add codex-switch to your user PATH"; Flags: che
 Source: "..\dist\CodexSwitch\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{userprograms}\Codex Switch"; Filename: "{app}\CodexSwitch.exe"
-Name: "{userdesktop}\Codex Switch"; Filename: "{app}\CodexSwitch.exe"; Tasks: desktopicon
+Name: "{userprograms}\Codex Switch"; Filename: "{app}\CodexSwitch.exe"; AppUserModelID: "FoundL.CodexSwitch"
+Name: "{userdesktop}\Codex Switch"; Filename: "{app}\CodexSwitch.exe"; AppUserModelID: "FoundL.CodexSwitch"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\CodexSwitch.exe"; Description: "Open Codex Switch"; Flags: nowait postinstall skipifsilent

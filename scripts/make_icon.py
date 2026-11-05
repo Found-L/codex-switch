@@ -1,37 +1,52 @@
-"""Generate the project's original switch glyph without external image tools."""
+"""Render the original linked-capsule brand at native Windows icon sizes."""
 from pathlib import Path
-import math
-import struct
-import zlib
 
-size = 64
-pixels = bytearray(size * size * 4)
-segments = [(15, 23, 49, 23), (41, 15, 49, 23), (41, 31, 49, 23),
-            (49, 42, 15, 42), (23, 34, 15, 42), (23, 50, 15, 42)]
+from PIL import Image, ImageDraw, ImageFilter
+
+DESTINATION = Path(__file__).resolve().parents[1] / "assets"
+SCALE = 4
+SIZE = 256 * SCALE
 
 
-def distance(x, y, x1, y1, x2, y2):
-    t = max(0, min(1, ((x-x1)*(x2-x1) + (y-y1)*(y2-y1)) / ((x2-x1)**2 + (y2-y1)**2)))
-    return math.hypot(x-(x1+t*(x2-x1)), y-(y1+t*(y2-y1)))
+def gradient(top, bottom):
+    image = Image.new("RGBA", (SIZE, SIZE))
+    pixels = image.load()
+    for y in range(SIZE):
+        for x in range(SIZE):
+            t = (0.25 * x + 0.75 * y) / (SIZE - 1)
+            pixels[x, y] = tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)) + (255,)
+    return image
 
 
-for y in range(size):
-    for x in range(size):
-        inside = (12 <= x <= 51 or 12 <= y <= 51 or
-                  math.hypot(x-(12 if x < 32 else 51), y-(12 if y < 32 else 51)) <= 12)
-        color = (26, 39, 62, 255) if inside else (0, 0, 0, 0)
-        if any(distance(x, y, *line) <= 2.3 for line in segments):
-            color = (114, 168, 255, 255)
-        offset = (y*size+x)*4
-        pixels[offset:offset+4] = bytes(color)
+def capsule(box, width):
+    mask = Image.new("L", (SIZE, SIZE))
+    ImageDraw.Draw(mask).rounded_rectangle(tuple(round(n * SCALE) for n in box),
+                                         radius=36 * SCALE, outline=255, width=width * SCALE)
+    return mask.rotate(38, resample=Image.Resampling.BICUBIC)
 
 
-def chunk(kind, data):
-    return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+def main():
+    DESTINATION.mkdir(exist_ok=True)
+    silhouette = Image.new("L", (SIZE, SIZE))
+    ImageDraw.Draw(silhouette).rounded_rectangle((6*SCALE, 6*SCALE, 250*SCALE, 250*SCALE), radius=57*SCALE, fill=255)
+    icon = gradient((37, 50, 91), (12, 19, 37))
+    icon.putalpha(silhouette)
+    rim = ImageDraw.Draw(icon)
+    rim.rounded_rectangle((7*SCALE, 7*SCALE, 249*SCALE, 249*SCALE), radius=56*SCALE,
+                          outline=(116, 145, 207, 75), width=SCALE)
+    first = capsule((43, 92, 153, 164), 16)
+    second = capsule((103, 92, 213, 164), 16)
+    icon = Image.composite(gradient((232, 251, 255), (139, 201, 255)), icon, first)
+    shadow = second.filter(ImageFilter.MaxFilter(6*SCALE+1))
+    icon = Image.composite(Image.new("RGBA", icon.size, (17, 25, 48, 255)), icon, shadow)
+    icon = Image.composite(gradient((136, 234, 255), (167, 153, 255)), icon, second)
+    icon.putalpha(silhouette)
+    large = icon.resize((256, 256), Image.Resampling.LANCZOS)
+    large.save(DESTINATION / "logo.png")
+    icon.resize((88, 88), Image.Resampling.LANCZOS).save(DESTINATION / "logo-88.png")
+    sizes = [(n, n) for n in (16, 20, 24, 32, 40, 48, 64, 128, 256)]
+    large.save(DESTINATION / "codex-switch.ico", sizes=sizes)
 
 
-rows = b''.join(b'\0' + pixels[y*size*4:(y+1)*size*4] for y in range(size))
-png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
-destination = Path(__file__).resolve().parents[1] / 'assets'
-destination.mkdir(exist_ok=True)
-(destination / 'codex-switch.ico').write_bytes(struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', size, size, 0, 0, 1, 32, len(png), 22) + png)
+if __name__ == "__main__":
+    main()

@@ -1,326 +1,518 @@
-"""Small bilingual desktop UI. Keys never leave the masked setup form/store."""
-import os
+"""Persistent Qt Quick utility window and native Windows tray lifecycle."""
+from concurrent.futures import ThreadPoolExecutor
+import ctypes
+import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
-import tkinter as tk
-from tkinter import messagebox
-import webbrowser
+
+from PySide6 import __version__ as pyside_version
+from PySide6.QtCore import QObject, Property, QEventLoop, QSettings, QTimer, QUrl, Signal, Slot, Qt
+from PySide6.QtGui import QAction, QCursor, QDesktopServices, QFont, QFontDatabase, QIcon
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
+from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickWindow
+from PySide6.QtQuickControls2 import QQuickStyle
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import __version__
+from .config import default_home
 from .errors import SwitchError
 from .service import SwitchService
 
-BG = "#10141d"
-CARD = "#1b2230"
-LINE = "#2d3749"
-TEXT = "#edf2fc"
-MUTED = "#98a8bf"
-BLUE = "#6b9dff"
-GREEN = "#72d6ac"
-
-COPY = {
-    "zh": {
-        "tag": "你的 Codex，随时切换", "overview": "连接总览", "settings": "API 配置",
-        "cli": "终端命令", "help": "使用帮助", "title": "选择你的连接方式",
-        "subtitle": "保留账号登录，在账号额度与 API 之间自由切换。",
-        "current": "当前配置", "account": "Codex 账号", "api": "OpenAI API",
-        "account_desc": "沿用 Codex 中已登录的账号", "api_desc": "使用自己的 Key，API 单独计费",
-        "selected": "已选择", "choose": "使用此连接", "configure": "配置 API Key",
-        "manage": "管理 API Key", "ready": "已配置", "missing": "待配置", "refresh": "刷新",
-        "scope": "切换后请新建会话，已有会话保留原连接。",
-        "success": "已切换到 {name}。请在 Codex 中新建会话。",
-        "other": "其他提供商", "error": "操作未完成", "close": "关闭",
-        "wizard_title": "连接你的 OpenAI API", "wizard_sub": "在这台电脑完成配置，即可从面板或终端切换。",
-        "step1": "01   准备好 API Key", "get_key": "打开 OpenAI Key 管理页 ↗",
-        "step2": "02   输入 API Key", "key_hint": "仅保存在当前 Windows 用户的凭据管理器中。",
-        "keep": "已保存 Key；留空可保留原 Key。", "show": "显示", "hide": "隐藏",
-        "step3": "03   初始模型", "model_hint": "仅新配置需要；已有模型设置会保留。",
-        "save": "保存并使用 API", "cancel": "取消", "need_key": "请先输入 API Key。",
-        "codex_link": "还没有 Codex？打开官方下载说明 ↗",
-        "cli_title": "在终端中同样顺手", "cli_sub": "安装后，打开一个新的 PowerShell 或命令提示符窗口。",
-        "cli_note": "配置 Key 时会隐藏输入。账号模式仍需先在 Codex 中登录账号。",
-        "copied": "命令已复制。", "copy": "复制", "cli_setup": "首次配置", "cli_status": "查看状态",
-        "cli_api": "切换 API", "cli_account": "切换账号", "helper_missing": "无法读取配置，请刷新或查看使用帮助。",
-        "profile": "选中的 Codex Profile 覆盖了提供商设置，请先移除该覆盖。",
-    },
-    "en": {
-        "tag": "Your Codex. Your connection.", "overview": "Connections", "settings": "API setup",
-        "cli": "Terminal", "help": "Help", "title": "Choose your connection",
-        "subtitle": "Keep your account signed in. Switch between account credits and API billing.",
-        "current": "CURRENT CONFIGURATION", "account": "Codex account", "api": "OpenAI API",
-        "account_desc": "Use the account signed in to Codex", "api_desc": "Your API key. Separate API billing.",
-        "selected": "Selected", "choose": "Use connection", "configure": "Set up API key",
-        "manage": "Manage API key", "ready": "Configured", "missing": "Setup needed", "refresh": "Refresh",
-        "scope": "Start a new chat after switching. Existing chats keep their connection.",
-        "success": "Switched to {name}. Start a new chat in Codex.",
-        "other": "Other provider", "error": "Action failed", "close": "Close",
-        "wizard_title": "Connect your OpenAI API", "wizard_sub": "Set up this computer, then switch from the app or terminal.",
-        "step1": "01   Get your API key", "get_key": "Open OpenAI API key dashboard ↗",
-        "step2": "02   Enter API key", "key_hint": "Stored in Windows Credential Manager for your user only.",
-        "keep": "Key saved. Leave blank to keep the existing key.", "show": "Show", "hide": "Hide",
-        "step3": "03   Initial model", "model_hint": "Only for a new configuration. Existing model settings are preserved.",
-        "save": "Save and use API", "cancel": "Cancel", "need_key": "Enter an API key first.",
-        "codex_link": "Need Codex? Open the official download guide ↗",
-        "cli_title": "Just as easy in your terminal", "cli_sub": "After installation, open a new PowerShell or Command Prompt window.",
-        "cli_note": "API key input is hidden. Account mode requires signing in to Codex first.",
-        "copied": "Command copied.", "copy": "Copy", "cli_setup": "First-time setup", "cli_status": "Check status",
-        "cli_api": "Use API", "cli_account": "Use account", "helper_missing": "Cannot read configuration. Refresh or see Help.",
-        "profile": "The selected Codex profile overrides the provider. Remove that override first.",
-    },
-}
+APP_ID = "FoundL.CodexSwitch"
 
 
-def label(parent, text, size=11, color=TEXT, bold=False, **kwargs):
-    return tk.Label(parent, text=text, bg=parent.cget("bg"), fg=color,
-                    font=("Segoe UI", size, "bold" if bold else "normal"), **kwargs)
+def resources():
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
 
 
-def button(parent, text, command, primary=False, **kwargs):
-    return tk.Button(parent, text=text, command=command, bg=BLUE if primary else "#293448",
-                     fg="#101725" if primary else TEXT, activebackground="#8db4ff" if primary else "#35425a",
-                     activeforeground="#101725" if primary else TEXT,
-                     disabledforeground=MUTED, font=("Segoe UI", 10, "bold"),
-                     relief="flat", bd=0, padx=16, pady=10, cursor="hand2", **kwargs)
+def application(testing=False):
+    if testing:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    if os.name == "nt" and not testing:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    QQuickStyle.setStyle("Basic")
+    app = QApplication.instance() or QApplication(["CodexSwitch"])
+    app.setApplicationName("Codex Switch")
+    app.setApplicationVersion(__version__)
+    app.setOrganizationName("FoundL")
+    app.setQuitOnLastWindowClosed(False)
+    app.setWindowIcon(QIcon(str(resources() / "assets" / "codex-switch.ico")))
+    if testing and os.name == "nt":
+        # The offscreen platform has no Windows system-font database. Register
+        # local OS fonts for headless previews without redistributing them.
+        font_directory = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+        for filename in ("segoeui.ttf", "seguisb.ttf", "msyh.ttc", "msyhbd.ttc", "consola.ttf"):
+            file = font_directory / filename
+            if file.is_file():
+                QFontDatabase.addApplicationFont(str(file))
+    app.setFont(QFont("Segoe UI", 10))
+    return app
 
 
-class App:
-    def __init__(self, root, service):
-        self.root, self.service = root, service
-        self.lang, self.page = "zh", "overview"
-        self.state = None
-        root.title("Codex Switch")
-        root.geometry("900x680")
-        root.minsize(860, 660)
-        icon = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "codex-switch.ico"
-        if icon.is_file():
-            root.iconbitmap(str(icon))
-        root.configure(bg=BG)
-        root.option_add("*Font", ("Segoe UI", 10))
-        self.render()
-        if self.state and not self.state["api_ready"] and self.state["mode"] == "account":
-            root.after(350, self.setup)
+class Bridge(QObject):
+    stateChanged = Signal()
+    busyChanged = Signal()
+    noticeChanged = Signal()
+    languageChanged = Signal()
+    compactChanged = Signal()
+    openPage = Signal(str)
+    keySaved = Signal()
+    windowHidden = Signal()
+    _completed = Signal(object)
 
-    def t(self, key):
-        return COPY[self.lang][key]
-
-    def render(self):
-        for widget in self.root.winfo_children():
-            widget.destroy()
-        sidebar = tk.Frame(self.root, bg="#151b26", width=190)
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
-        brand = tk.Canvas(sidebar, width=44, height=44, bg="#151b26", highlightthickness=0)
-        brand.pack(anchor="w", padx=22, pady=(26, 12))
-        brand.create_oval(2, 2, 42, 42, outline=BLUE, width=2)
-        brand.create_text(22, 21, text="⇄", fill=BLUE, font=("Segoe UI", 23, "bold"))
-        label(sidebar, "Codex Switch", 16, bold=True).pack(anchor="w", padx=22)
-        label(sidebar, self.t("tag"), 9, MUTED).pack(anchor="w", padx=22, pady=(8, 32))
-        for key, action in (("overview", lambda: self.navigate("overview")),
-                            ("settings", self.setup), ("cli", lambda: self.navigate("cli"))):
-            nav = button(sidebar, self.t(key), action)
-            nav.configure(anchor="w", bg="#263653" if self.page == key else "#151b26")
-            nav.pack(fill="x", padx=12, pady=4)
-        bottom = tk.Frame(sidebar, bg="#151b26")
-        bottom.pack(side="bottom", fill="x", padx=22, pady=22)
-        button(bottom, "English" if self.lang == "zh" else "中文", self.toggle_language).pack(fill="x", pady=(0, 10))
-        link = label(bottom, self.t("help") + " ↗", 10, MUTED, cursor="hand2")
-        link.pack(anchor="w")
-        link.bind("<Button-1>", lambda _: webbrowser.open("https://github.com/Found-L/codex-switch#readme"))
-        label(bottom, "v" + __version__, 9, "#61738d").pack(anchor="w", pady=(12, 0))
-        self.content = tk.Frame(self.root, bg=BG)
-        self.content.pack(side="left", fill="both", expand=True, padx=30, pady=28)
-        self.notice = tk.StringVar()
-        if self.page == "cli":
-            self.render_cli()
-        else:
-            self.render_overview()
-
-    def navigate(self, page):
-        self.page = page
-        self.render()
-
-    def toggle_language(self):
-        self.lang = "en" if self.lang == "zh" else "zh"
-        self.render()
-
-    def render_overview(self):
-        label(self.content, self.t("title"), 23, bold=True).pack(anchor="w")
-        label(self.content, self.t("subtitle"), 10, MUTED, wraplength=570, justify="left").pack(anchor="w", pady=(10, 25))
+    def __init__(self, service, testing=False):
+        super().__init__()
+        self.service, self.testing = service, testing
+        self.window = None
+        self._anchored = False
+        self.tray = None
+        self.menu = None
+        self._busy = False
+        self._refreshing = False
+        self._notice, self._is_error = "", False
+        self._closing, self._quit_when_idle = False, False
+        self.settings = None if testing else QSettings("FoundL", "CodexSwitch")
+        self._language = "zh" if testing else self.settings.value("language", "zh")
+        self._compact = False if testing else self.settings.value("compact", False, type=bool)
+        self._font_family = "Segoe UI Variable Text" if "Segoe UI Variable Text" in QFontDatabase.families() else "Segoe UI"
+        self._state = {"mode": "account", "api_ready": False, "key_saved": False, "profile_override": None}
+        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-config")
+        self._completed.connect(self._apply_result)
+        self.notice_timer = QTimer(self)
+        self.notice_timer.setSingleShot(True)
+        self.notice_timer.timeout.connect(self.clearNotice)
         try:
-            self.state = self.service.status()
+            self._state = service.status()
         except Exception as error:
-            self.state = None
-            self.show_error(error)
-        mode = self.state["mode"] if self.state else "other"
-        current = tk.Frame(self.content, bg=CARD, highlightbackground=LINE, highlightthickness=1)
-        current.pack(fill="x", pady=(0, 20))
-        label(current, self.t("current"), 9, MUTED).pack(anchor="w", padx=22, pady=(18, 10))
-        label(current, self.t(mode), 24, BLUE if mode == "api" else GREEN, True).pack(anchor="w", padx=22, pady=(0, 18))
-        cards = tk.Frame(self.content, bg=BG)
-        cards.pack(fill="x")
-        cards.columnconfigure((0, 1), weight=1, uniform="card")
-        for column, kind in enumerate(("account", "api")):
-            selected = mode == kind
-            frame = tk.Frame(cards, bg=CARD, highlightbackground=BLUE if selected else LINE,
-                             highlightthickness=2 if selected else 1)
-            frame.grid(row=0, column=column, sticky="nsew", padx=(0, 7) if column == 0 else (7, 0))
-            label(frame, "C" if kind == "account" else "API", 13, GREEN if kind == "account" else BLUE, True).pack(anchor="w", padx=18, pady=(18, 14))
-            label(frame, self.t(kind), 14, bold=True).pack(anchor="w", padx=18)
-            label(frame, self.t(kind + "_desc"), 9, MUTED, wraplength=210, justify="left", height=3).pack(anchor="w", padx=18, pady=(5, 10))
-            missing = kind == "api" and (not self.state or not self.state["api_ready"])
-            text = self.t("configure") if missing else self.t("selected") if selected else self.t("choose")
-            action = self.setup if missing else lambda value=kind: self.switch(value)
-            control = button(frame, text, action, primary=not selected)
-            control.pack(fill="x", padx=16, pady=(0, 16))
-            if selected and not missing:
-                control.configure(state="disabled", bg="#243347")
-        row = tk.Frame(self.content, bg=BG)
-        row.pack(fill="x", pady=(18, 0))
-        button(row, self.t("manage"), self.setup).pack(side="left")
-        button(row, self.t("refresh"), self.render).pack(side="right")
-        if self.state and self.state["profile_override"]:
-            self.notice.set(self.t("profile"))
-        label(self.content, "", 10, GREEN, textvariable=self.notice, wraplength=570, justify="left").pack(anchor="w", pady=(14, 0))
-        label(self.content, self.t("scope"), 9, MUTED, wraplength=570, justify="left").pack(side="bottom", anchor="w", pady=(12, 0))
+            self._set_notice(self._safe_error(error), True)
+        self.timer = QTimer(self)
+        self.timer.setInterval(4000)
+        self.timer.timeout.connect(self._refresh_if_visible)
+        if not testing:
+            self.timer.start()
 
-    def switch(self, mode):
-        try:
-            self.service.use(mode)
-            self.render()
-            self.notice.set(self.t("success").format(name=self.t(mode)))
-        except Exception as error:
-            self.show_error(error)
+    @Property("QVariantMap", notify=stateChanged)
+    def state(self):
+        return self._state
 
-    def show_error(self, error):
-        text = str(error) if isinstance(error, SwitchError) else self.t("helper_missing")
-        messagebox.showerror(self.t("error"), text, parent=self.root)
+    @Property(bool, notify=busyChanged)
+    def busy(self):
+        return self._busy
 
-    def setup(self):
-        dialog = tk.Toplevel(self.root)
-        dialog.title(self.t("settings") + " — Codex Switch")
-        dialog.configure(bg=BG)
-        dialog.geometry("620x570")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-        body = tk.Frame(dialog, bg=BG)
-        body.pack(fill="both", expand=True, padx=28, pady=24)
-        label(body, self.t("wizard_title"), 22, bold=True).pack(anchor="w")
-        label(body, self.t("wizard_sub"), 10, MUTED, wraplength=560, justify="left").pack(anchor="w", pady=(10, 22))
-        label(body, self.t("step1"), 11, bold=True).pack(anchor="w")
-        link = label(body, self.t("get_key"), 10, BLUE, cursor="hand2")
-        link.pack(anchor="w", pady=(8, 22))
-        link.bind("<Button-1>", lambda _: webbrowser.open("https://platform.openai.com/api-keys"))
-        label(body, self.t("step2"), 11, bold=True).pack(anchor="w")
-        key_row = tk.Frame(body, bg=BG)
-        key_row.pack(fill="x", pady=(10, 6))
-        key = tk.Entry(key_row, show="•", bg=CARD, fg=TEXT, insertbackground=TEXT,
-                       relief="flat", font=("Segoe UI", 12), borderwidth=10)
-        key.pack(side="left", fill="x", expand=True)
-        visible = tk.BooleanVar(value=False)
+    @Property(str, notify=noticeChanged)
+    def notice(self):
+        return self._notice
 
-        def toggle():
-            visible.set(not visible.get())
-            key.configure(show="" if visible.get() else "•")
-            eye.configure(text=self.t("hide") if visible.get() else self.t("show"))
+    @Property(bool, notify=noticeChanged)
+    def isError(self):
+        return self._is_error
 
-        eye = button(key_row, self.t("show"), toggle)
-        eye.pack(side="right", padx=(8, 0))
-        label(body, self.t("key_hint"), 9, MUTED, wraplength=550).pack(anchor="w")
-        try:
-            state = self.service.status()
-        except Exception as error:
-            dialog.destroy()
-            self.show_error(error)
+    @Property(str, notify=languageChanged)
+    def language(self):
+        return self._language
+
+    @Property(bool, notify=compactChanged)
+    def compact(self):
+        return self._compact
+
+    @Property(bool, constant=True)
+    def testingMode(self):
+        return self.testing
+
+    @Property(str, constant=True)
+    def version(self):
+        return __version__
+
+    @Property(str, constant=True)
+    def logoUrl(self):
+        return QUrl.fromLocalFile(str(resources() / "assets" / "logo.png")).toString()
+
+    @Property(str, constant=True)
+    def fontFamily(self):
+        return self._font_family
+
+    def tr_text(self, zh, en):
+        return zh if self._language == "zh" else en
+
+    def _safe_error(self, error):
+        return str(error) if isinstance(error, SwitchError) else self.tr_text("无法保存本地配置，请检查权限后重试。", "Cannot update local configuration. Check permissions and retry.")
+
+    def _set_notice(self, text, error=False):
+        self._notice, self._is_error = text, error
+        self.noticeChanged.emit()
+        if text:
+            self.notice_timer.start(12000 if error else 5500)
+
+    def _submit(self, operation, kind):
+        if self._busy or self._closing or (kind == "refresh" and self._refreshing):
             return
-        keep = state["key_saved"]
-        if keep:
-            label(body, self.t("keep"), 9, GREEN).pack(anchor="w", pady=(6, 0))
-        label(body, self.t("step3"), 11, bold=True).pack(anchor="w", pady=(20, 8))
-        model = tk.Entry(body, bg=CARD, fg=TEXT, insertbackground=TEXT, relief="flat", borderwidth=8)
-        model.insert(0, state["model"] or "gpt-6.1-sol")
-        model.pack(fill="x")
-        if state["model"]:
-            model.configure(state="disabled", disabledbackground=CARD, disabledforeground=MUTED)
-        label(body, self.t("model_hint"), 9, MUTED, wraplength=550).pack(anchor="w", pady=(6, 14))
+        if kind == "refresh":
+            self._refreshing = True
+        else:
+            self._busy = True
+            self.busyChanged.emit()
+            self._update_tray()
+
+        def work():
+            error = None
+            try:
+                operation()
+            except Exception as exception:
+                error = self._safe_error(exception)
+            try:
+                state = self.service.status()
+            except Exception:
+                state = self._state
+            return {"kind": kind, "error": error, "state": state}
+
+        future = self.pool.submit(work)
+        future.add_done_callback(lambda done: self._completed.emit(done.result()))
+
+    @Slot(object)
+    def _apply_result(self, result):
+        if self._state != result["state"]:
+            self._state = result["state"]
+            self.stateChanged.emit()
+        if result["kind"] == "refresh":
+            self._refreshing = False
+        else:
+            self._busy = False
+            self.busyChanged.emit()
+        self._update_tray()
+        if result["error"]:
+            self._set_notice(result["error"], True)
+        elif result["kind"] in ("switch", "setup"):
+            name = "OpenAI API" if self._state["mode"] == "api" else self.tr_text("Codex 账号", "Codex account")
+            self._set_notice(self.tr_text("已切换到 " + name + "，请新建会话。", "Switched to " + name + ". Start a new chat."))
+            if result["kind"] == "setup":
+                self.keySaved.emit()
+                self.openPage.emit("connections")
+        if self._quit_when_idle:
+            self.quitApp()
+
+    @Slot(str)
+    def switchTo(self, mode):
+        if self._busy:
+            return
+        if mode == "api" and not self._state.get("api_ready"):
+            if self._compact:
+                self.toggleCompact()
+            self.openPage.emit("key")
+            self.show_window()
+            return
+        self._submit(lambda: self.service.use(mode), "switch")
+
+    @Slot(str)
+    def saveKey(self, key):
+        if not key.strip() and not self._state.get("key_saved"):
+            self._set_notice(self.tr_text("请先输入 API Key。", "Enter an API key first."), True)
+            return
 
         def save():
-            value = key.get().strip()
-            if not value and not keep:
-                messagebox.showerror(self.t("error"), self.t("need_key"), parent=dialog)
-                return
-            try:
-                self.service.setup(value if value else None, model.get().strip())
-                self.service.use("api")
-                key.delete(0, "end")
-                dialog.destroy()
-                self.page = "overview"
-                self.render()
-                self.notice.set(self.t("success").format(name=self.t("api")))
-            except Exception as error:
-                self.show_error(error)
+            self.service.setup(key if key.strip() else None)
+            self.service.use("api")
 
-        actions = tk.Frame(body, bg=BG)
-        actions.pack(fill="x", pady=(4, 12))
-        button(actions, self.t("save"), save, primary=True).pack(side="left")
-        button(actions, self.t("cancel"), dialog.destroy).pack(side="right")
-        download = label(body, self.t("codex_link"), 9, MUTED, cursor="hand2")
-        download.pack(anchor="w")
-        download.bind("<Button-1>", lambda _: webbrowser.open("https://learn.chatgpt.com/docs/quickstart"))
-        key.focus_set()
+        self._submit(save, "setup")
 
-    def render_cli(self):
-        label(self.content, self.t("cli_title"), 23, bold=True).pack(anchor="w")
-        label(self.content, self.t("cli_sub"), 10, MUTED, wraplength=570, justify="left").pack(anchor="w", pady=(12, 28))
-        for title, command in (("cli_setup", "codex-switch setup --use"), ("cli_status", "codex-switch status"),
-                               ("cli_api", "codex-switch use api"), ("cli_account", "codex-switch use account")):
-            label(self.content, self.t(title), 10, MUTED).pack(anchor="w", pady=(6, 6))
-            row = tk.Frame(self.content, bg=CARD)
-            row.pack(fill="x", pady=(0, 10))
-            tk.Label(row, text=command, font=("Consolas", 11), bg=CARD, fg=BLUE, padx=14, pady=12).pack(side="left")
-            button(row, self.t("copy"), lambda value=command: self.copy(value)).pack(side="right", padx=4)
-        label(self.content, self.t("cli_note"), 10, MUTED, wraplength=570, justify="left").pack(anchor="w", pady=14)
-        label(self.content, "", 10, GREEN, textvariable=self.notice).pack(anchor="w")
+    @Slot()
+    def refresh(self):
+        self._submit(lambda: None, "refresh")
 
-    def copy(self, command):
-        self.root.clipboard_clear()
-        self.root.clipboard_append(command)
-        self.notice.set(self.t("copied"))
+    def _refresh_if_visible(self):
+        if self.window and self.window.isVisible() and not self._busy:
+            self.refresh()
+
+    @Slot()
+    def toggleLanguage(self):
+        self._language = "en" if self._language == "zh" else "zh"
+        if self.settings:
+            self.settings.setValue("language", self._language)
+        self.languageChanged.emit()
+        self._update_tray()
+
+    @Slot()
+    def toggleCompact(self):
+        self._compact = not self._compact
+        if self.settings:
+            self.settings.setValue("compact", self._compact)
+        self.compactChanged.emit()
+        self._update_tray()
+
+    @Slot(str)
+    def copyText(self, text):
+        QApplication.clipboard().setText(text)
+        self._set_notice(self.tr_text("命令已复制。", "Command copied."))
+
+    @Slot(str)
+    def openLink(self, name):
+        links = {"key": "https://platform.openai.com/api-keys", "codex": "https://learn.chatgpt.com/docs/quickstart",
+                 "help": "https://github.com/Found-L/codex-switch#readme"}
+        if name in links:
+            QDesktopServices.openUrl(QUrl(links[name]))
+
+    @Slot()
+    def clearNotice(self):
+        self._set_notice("")
+
+    def attach(self, window):
+        self.window = window
+        window.activeChanged.connect(self._focus_changed)
+        window.setIcon(QIcon(str(resources() / "assets" / "codex-switch.ico")))
+        if not self.testing and QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray = QSystemTrayIcon(QApplication.windowIcon(), self)
+            self.menu = QMenu()
+            self.menu.setStyleSheet("QMenu {background:#ffffff;color:#242936;border:1px solid #e3e6ed;border-radius:8px;padding:6px;} QMenu::item {padding:7px 20px;border-radius:5px;} QMenu::item:selected {background:#eef0ff;color:#5146d8;} QMenu::separator {height:1px;background:#eceef3;margin:5px;}")
+            self.open_action = self.menu.addAction("Open", lambda: self.show_window(anchor=True))
+            self.compact_action = self.menu.addAction("Mini", self._tray_compact)
+            self.menu.addSeparator()
+            self.provider_actions = {}
+            for mode in ("account", "api"):
+                action = self.menu.addAction(mode)
+                action.setCheckable(True)
+                action.triggered.connect(lambda checked=False, value=mode: self._tray_switch(value))
+                self.provider_actions[mode] = action
+            self.menu.addSeparator()
+            self.key_action = self.menu.addAction("API Key", self._tray_setup)
+            self.quit_action = self.menu.addAction("Quit", self.quitApp)
+            self._update_tray()
+            self.tray.setContextMenu(self.menu)
+            self.tray.activated.connect(self._tray_activated)
+            self.tray.show()
+
+    def _update_tray(self):
+        if not self.tray:
+            return
+        name = "OpenAI API" if self._state["mode"] == "api" else self.tr_text("Codex 账号", "Codex account")
+        self.tray.setToolTip("Codex Switch · " + name)
+        self.open_action.setText(self.tr_text("打开面板", "Open panel"))
+        self.compact_action.setText(self.tr_text("迷你窗口" if not self._compact else "完整面板", "Mini window" if not self._compact else "Full panel"))
+        for mode, title in (("account", self.tr_text("Codex 账号", "Codex account")), ("api", "OpenAI API")):
+            action = self.provider_actions[mode]
+            action.setText(title)
+            action.setChecked(self._state["mode"] == mode)
+            action.setEnabled(not self._busy)
+        self.key_action.setText(self.tr_text("配置 API Key", "API key settings"))
+        self.quit_action.setText(self.tr_text("退出 Codex Switch", "Quit Codex Switch"))
+
+    def _tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_window(anchor=True)
+        elif reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if self.window.isVisible():
+                self.hideToTray()
+            else:
+                self.show_window(anchor=True)
+
+    def _tray_compact(self):
+        self.toggleCompact()
+        QTimer.singleShot(0, lambda: self.show_window(anchor=True))
+
+    def _tray_switch(self, mode):
+        self.switchTo(mode)
+
+    def _tray_setup(self):
+        if self._compact:
+            self.toggleCompact()
+        self.openPage.emit("key")
+        QTimer.singleShot(0, lambda: self.show_window(anchor=True))
+
+    def show_window(self, anchor=False):
+        if not self.window or self.testing:
+            return
+        self._anchored = anchor
+        if anchor and self.tray:
+            rectangle = self.tray.geometry()
+            point = rectangle.center() if not rectangle.isEmpty() else QCursor.pos()
+            screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+            available = screen.availableGeometry()
+            self.window.setX(max(available.left(), min(point.x() - self.window.width() // 2, available.right() - self.window.width())))
+            self.window.setY(max(available.top(), available.bottom() - self.window.height() - 8))
+        self.window.showNormal()
+        self.window.raise_()
+        self.window.requestActivate()
+        self.refresh()
+
+    def _focus_changed(self):
+        if self._anchored and self.window and not self.window.isActive():
+            QTimer.singleShot(160, self._dismiss_popover)
+
+    def _dismiss_popover(self):
+        if (self._anchored and self.window and not self.window.isActive() and not self._busy
+                and not (self.menu and self.menu.isVisible())):
+            self.hideToTray()
+
+    @Slot()
+    def hideToTray(self):
+        if self.window and self.tray and self.tray.isVisible():
+            self.windowHidden.emit()
+            self.window.hide()
+        elif not self.testing:
+            self.quitApp()
+
+    @Slot()
+    def quitApp(self):
+        if self._busy:
+            self._quit_when_idle = True
+            self._set_notice(self.tr_text("保存完成后退出…", "Quitting after the save finishes…"))
+            return
+        self._closing = True
+        if self.tray:
+            self.tray.hide()
+        QApplication.instance().quit()
+
+    def shutdown(self):
+        self._closing = True
+        self.timer.stop()
+        self.notice_timer.stop()
+        if self.tray:
+            self.tray.hide()
+        self.pool.shutdown(wait=True, cancel_futures=True)
+
+
+def load_scene(model):
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("bridge", model)
+    engine.load(QUrl.fromLocalFile(str(resources() / "ui" / "Main.qml")))
+    if not engine.rootObjects():
+        raise RuntimeError("The desktop scene could not be loaded.")
+    window = engine.rootObjects()[0]
+    model.attach(window)
+    return engine, window
+
+
+def instance_server(home, model):
+    identity = hashlib.sha256(str(home.resolve()).casefold().encode()).hexdigest()[:24]
+    name = "FoundL-CodexSwitch-" + identity
+    socket = QLocalSocket()
+    socket.connectToServer(name)
+    if socket.waitForConnected(250):
+        socket.write(b"show")
+        socket.waitForBytesWritten(500)
+        socket.disconnectFromServer()
+        return None
+    server = QLocalServer(model)
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
+    if not server.listen(name):
+        # Another process may have won the race while this process was starting.
+        socket.connectToServer(name)
+        if socket.waitForConnected(500):
+            socket.write(b"show")
+            socket.waitForBytesWritten(500)
+            return None
+        raise RuntimeError("Cannot open the application activation channel.")
+
+    def receive(client):
+        data = bytes(client.readAll()).strip()
+        if data == b"status":
+            client.write(json.dumps({"version": __version__, "visible": bool(model.window and model.window.isVisible()),
+                                     "compact": model.compact, "tray_visible": bool(model.tray and model.tray.isVisible())}).encode())
+            client.flush()
+        elif data == b"show":
+            model.show_window()
+        client.disconnectFromServer()
+
+    def accept():
+        while server.hasPendingConnections():
+            connection = server.nextPendingConnection()
+            connection.readyRead.connect(lambda client=connection: receive(client))
+            connection.disconnected.connect(connection.deleteLater)
+            if connection.bytesAvailable():
+                receive(connection)
+
+    server.newConnection.connect(accept)
+    return server
 
 
 def run(home=None):
-    root = tk.Tk()
-    try:
-        service = SwitchService(home)
-        App(root, service)
-        root.mainloop()
-    except Exception as error:
-        text = str(error) if isinstance(error, SwitchError) else "Cannot start Codex Switch. Check permissions or reinstall."
-        messagebox.showerror("Codex Switch", text, parent=root)
-        root.destroy()
+    app = application()
+    model = Bridge(SwitchService(home))
+    server = instance_server(model.service.home, model)
+    if server is None:
+        model.shutdown()
+        return
+    engine, window = load_scene(model)
+    app.aboutToQuit.connect(model.shutdown)
+    model.show_window()
+    app.exec()
+    server.close()
 
 
 def self_test(report):
-    """Build the real frozen UI without opening a window or accessing user secrets."""
-    root = None
+    """Run the real QML scene offscreen using an isolated config and fake key store."""
+    result = {"ok": False}
+    model = None
     try:
-        class NoCredentials:
-            def read(self):
-                return None
+        app = application(testing=True)
 
-        with tempfile.TemporaryDirectory(prefix="codex-switch-gui-") as home:
-            root = tk.Tk()
-            root.withdraw()
-            App(root, SwitchService(Path(home), credentials=NoCredentials(), track=False))
-            root.update_idletasks()
-            result = {"ok": True, "version": __version__, "tcl": root.tk.call("info", "patchlevel"),
-                      "tk": root.tk.call("package", "provide", "Tk")}
+        class MemoryCredentials:
+            value = None
+            def read(self): return self.value
+            def write(self, key): self.value = key
+            def delete(self): self.value = None
+
+        with tempfile.TemporaryDirectory(prefix="codex-switch-qt-") as home:
+            service = SwitchService(Path(home), credentials=MemoryCredentials(), track=False)
+            model = Bridge(service, testing=True)
+            engine, window = load_scene(model)
+            app.processEvents()
+            names = ("connectionsPage", "keyPage", "terminalPage", "selectionPill", "apiKeyField")
+            objects = {name: window.findChild(QObject, name) for name in names}
+            if not all(objects.values()):
+                raise RuntimeError("Required persistent controls are missing.")
+            if window.findChild(QObject, "modelField") is not None:
+                raise RuntimeError("Model selection must remain in Codex.")
+
+            def wait_idle():
+                loop = QEventLoop()
+                timer = QTimer()
+                timer.setInterval(10)
+                timer.timeout.connect(lambda: loop.quit() if not model.busy else None)
+                QTimer.singleShot(8000, loop.quit)
+                timer.start()
+                loop.exec()
+                timer.stop()
+                if model.busy or model.isError:
+                    raise RuntimeError("Asynchronous UI operation did not complete.")
+
+            model.saveKey("qt-fixture-not-real")
+            wait_idle()
+            if model.state["mode"] != "api": raise RuntimeError("API setup did not switch.")
+            model.switchTo("account")
+            wait_idle()
+            if model.state["mode"] != "account": raise RuntimeError("Account switch did not complete.")
+            model.switchTo("api")
+            wait_idle()
+            for name, original in objects.items():
+                if window.findChild(QObject, name) is not original:
+                    raise RuntimeError("A state update rebuilt the scene.")
+            model.toggleCompact()
+            app.processEvents()
+            if window.width() != 372 or window.height() != 302:
+                raise RuntimeError("Mini window geometry is incorrect.")
+            if "model" in __import__("tomllib").loads(service.config.read().decode()):
+                raise RuntimeError("Setup unexpectedly wrote a model.")
+            server = instance_server(service.home, model)
+            if server is None or instance_server(service.home, model) is not None:
+                raise RuntimeError("Single-instance activation did not work.")
+            app.processEvents()
+            server.close()
+            result = {"ok": True, "version": __version__, "qt": pyside_version,
+                      "persistent_controls": True, "async_switching": True,
+                      "mini_window": True, "single_instance": True, "setup_entry_count": 1}
+            model.shutdown()
+            model = None
+            window.close()
+            engine.deleteLater()
+            app.processEvents()
     except Exception as error:
         result = {"ok": False, "error_type": type(error).__name__}
     finally:
-        if root is not None:
-            root.destroy()
+        if model:
+            model.shutdown()
     Path(report).write_text(json.dumps(result), encoding="utf-8")
     return 0 if result["ok"] else 1

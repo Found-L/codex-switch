@@ -28,7 +28,6 @@ def main(argv=None):
     setup = commands.add_parser("setup", help="Securely enter an API key; never pass it as a command argument")
     setup.add_argument("--use", action="store_true", help="Switch to API after setup")
     setup.add_argument("--key-stdin", action="store_true", help="Read key from redirected stdin (not shell history)")
-    setup.add_argument("--model", default="gpt-6.1-sol", help="Initial model only if no model is configured")
     commands.add_parser("gui", help="Open the desktop application")
     commands.add_parser("credential", help=argparse.SUPPRESS)
     commands.add_parser("uninstall-cleanup", help=argparse.SUPPRESS)
@@ -44,8 +43,13 @@ def main(argv=None):
                     command += ["--codex-home", str(args.codex_home)]
                 subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW)
             else:
-                from .gui import run
-                run(args.codex_home)
+                executable = Path(sys.executable)
+                if executable.name.lower() == "python.exe":
+                    executable = executable.with_name("pythonw.exe")
+                command = [str(executable), str(Path(__file__).resolve().parents[2] / "app_gui.py")]
+                if args.codex_home:
+                    command += ["--codex-home", str(args.codex_home)]
+                subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW)
             return 0
         if args.command == "uninstall-cleanup":
             for home in set([SwitchService(args.codex_home).home, *registered_homes()]):
@@ -82,7 +86,7 @@ def main(argv=None):
                 if not sys.stdin.isatty():
                     raise SwitchError("Use --key-stdin for redirected input.")
                 key = getpass.getpass("OpenAI API key (hidden): ")
-            service.setup(key, args.model)
+            service.setup(key)
             print("API key saved in Windows Credential Manager.")
             if args.use:
                 service.use("api")

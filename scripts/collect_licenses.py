@@ -3,19 +3,14 @@ import importlib.metadata
 from pathlib import Path
 import shutil
 import sys
-import tkinter
 
 root = Path(__file__).resolve().parents[1]
 destination = root / "dist" / "CodexSwitch" / "licenses"
 destination.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(Path(sys.base_prefix) / "LICENSE.txt", destination / "PYTHON-LICENSE.txt")
-tcl = Path(tkinter.Tcl().eval("info library"))
-tk_license = next(tcl.parent.glob("tk*/license.terms"), None)
-if tk_license is None:
-    # Hosted Python distributions may omit non-runtime license files.
-    tk_license = root / "third_party" / "TCL-TK-LICENSE.txt"
-shutil.copyfile(tk_license, destination / "TCL-TK-LICENSE.txt")
-for name in ("tomlkit", "pyinstaller"):
+for file in (root / "third_party").glob("QT-*.txt"):
+    shutil.copyfile(file, destination / file.name)
+for name in ("tomlkit", "pyinstaller", "PySide6-Essentials", "shiboken6"):
     distribution = importlib.metadata.distribution(name)
     found = False
     for entry in distribution.files:

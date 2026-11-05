@@ -1,16 +1,20 @@
-param([string]$Version = '0.1.2', [switch]$SkipInstaller, [string]$IsccPath)
+param([string]$Version = '0.2.0', [switch]$SkipInstaller, [string]$IsccPath)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$originalBuildPath = $env:PATH
 Push-Location $root
 try {
     $python = Join-Path $root '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { throw 'Create .venv and install requirements-build.txt first.' }
+    # Keep unrelated native toolchains on the developer PATH out of DLL discovery.
+    $pythonBase = & $python -c 'import sys; print(sys.base_prefix)'
+    $env:PATH = @((Split-Path -Parent $python), $pythonBase, (Join-Path $env:WINDIR 'System32'), $env:WINDIR) -join ';'
     & $python -m unittest discover -s tests -v
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
     & $python 'scripts\make_icon.py'
-    & $python -m PyInstaller --noconfirm --clean --onedir --windowed --name CodexSwitch --icon assets/codex-switch.ico --add-data 'assets;assets' --paths src app_gui.py
+    & $python -m PyInstaller --noconfirm --clean --onedir --windowed --name CodexSwitch --icon assets/codex-switch.ico --add-data 'assets;assets' --add-data 'ui;ui' --paths src app_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'GUI build failed.' }
-    & $python -m PyInstaller --noconfirm --clean --onefile --console --name codex-switch --icon assets/codex-switch.ico --paths src app_cli.py
+    & $python -m PyInstaller --noconfirm --clean --onefile --console --name codex-switch --icon assets/codex-switch.ico --exclude-module PySide6 --exclude-module tkinter --paths src app_cli.py
     if ($LASTEXITCODE -ne 0) { throw 'CLI build failed.' }
     Copy-Item -LiteralPath 'dist\codex-switch.exe' -Destination 'dist\CodexSwitch\codex-switch.exe' -Force
     Copy-Item -LiteralPath 'README.md','README.en.md','LICENSE','THIRD_PARTY_NOTICES.md' -Destination 'dist\CodexSwitch' -Force
@@ -36,7 +40,7 @@ try {
         & $IsccPath "/DAppVersion=$Version" 'installer\CodexSwitch.iss'
         if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
     }
-    $hashes = Get-ChildItem -LiteralPath 'release' -File | Where-Object { $_.Extension -in '.exe','.zip' } |
+    $hashes = Get-ChildItem -LiteralPath 'release' -File | Where-Object { $_.Name -like "CodexSwitch-$Version-*" -and $_.Extension -in '.exe','.zip' } |
         Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $_.Path) }
     [IO.File]::WriteAllLines((Join-Path $root 'release\SHA256SUMS.txt'), $hashes, (New-Object Text.UTF8Encoding($false)))
-} finally { Pop-Location }
+} finally { $env:PATH = $originalBuildPath; Pop-Location }

@@ -10,10 +10,20 @@ A small Windows app and CLI for switching Codex between an existing account logi
 
 1. Install [Codex](https://learn.chatgpt.com/docs/quickstart). Sign in to Codex first if you want to use account credits.
 2. Install `CodexSwitch-VERSION-windows-x64-setup.exe`. Windows 10/11 x64; no Python or administrator access required.
-3. Open **Codex Switch**, enter your own [OpenAI API key](https://platform.openai.com/api-keys), then select **Save and use API**. Existing model settings are preserved; new configurations can specify an initial model.
+3. Open **Codex Switch**, enter your own [OpenAI API key](https://platform.openai.com/api-keys), then select **Save and use API**. Choose your model and reasoning level in Codex. This tool preserves model configuration.
 4. Start a new Codex chat. Use the connection cards to switch back later. The UI includes an English/Chinese toggle.
 
 Keys are kept in Windows Credential Manager, scoped to your Windows user and Codex configuration directory. Enter your own key again on another computer. Account credits and API usage have separate billing.
+
+## Window and tray
+
+The persistent Qt Quick scene updates state without rebuilding controls, with animated selection and page transitions. The top-right mini button opens a 372 × 302 compact window. Closing or minimizing hides the app to the Windows notification area, which may be under hidden icons. Click its tray icon to toggle the panel; right-click to switch providers, configure a key, or quit.
+
+A tray-opened panel dismisses on focus loss; a desktop-opened window stays visible. Opening the same configuration directory again restores its existing window. In-window shortcuts: `Ctrl+M` hides to tray, `Ctrl+Shift+M` toggles mini mode, and `Ctrl+Q` quits. Switching does not require a chat message.
+
+![Connection panel](docs/images/overview.png)
+
+Screenshots are offscreen renders of the actual QML interface with isolated fixture configuration.
 
 ## Terminal
 

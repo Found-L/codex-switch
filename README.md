@@ -6,18 +6,30 @@ Windows 上的 Codex 账号 / OpenAI API 切换工具。首次配置 Key，之�
 
 **[下载安装包 / 便携版](https://github.com/Found-L/codex-switch/releases/latest)** · [问题反馈](https://github.com/Found-L/codex-switch/issues)
 
-![Codex Switch 连接总览](docs/images/overview-zh.jpg)
+![Codex Switch 连接总览](docs/images/overview.png)
 
 ## 新电脑开始使用
 
 1. 安装 [Codex](https://learn.chatgpt.com/docs/quickstart)。使用账号额度前，先在 Codex 中登录自己的账号。
 2. 从 Releases 下载 `CodexSwitch-版本-windows-x64-setup.exe` 并安装。Windows 10/11 x64，无需 Python 或管理员权限。
-3. 打开 **Codex Switch**，按首次引导创建并输入自己的 [OpenAI API Key](https://platform.openai.com/api-keys)，选择「保存并使用 API」。已有模型设置会保留；全新配置可填写初始模型。
+3. 打开 **Codex Switch**，按首次引导创建并输入自己的 [OpenAI API Key](https://platform.openai.com/api-keys)，选择「保存并使用 API」。模型和推理档位在 Codex 中选择，本工具保留模型配置。
 4. 在 Codex 中新建会话。以后点击连接卡片即可切回账号或 API。
 
 Key 仅保存在这台电脑、当前 Windows 用户的凭据管理器中。换电脑后重新输入自己的 Key，不需要复制旧电脑的登录文件。账号额度和 API 分开计费。
 
 窗口支持中文 / English，另有终端命令速查。安装器默认创建桌面入口并加入当前用户 PATH；可在安装时取消。已打开的终端需要重新打开后才能使用新 PATH。
+
+## 窗口与托盘
+
+新版使用 Qt Quick 常驻界面：切换只更新状态，选择滑块和页面淡入淡出，不重新创建窗口。右上角小窗按钮可切换到 **372 × 302** 的迷你窗口；关闭按钮或最小化会收进 Windows 通知区域。托盘图标可能位于任务栏的「显示隐藏的图标」中，可拖到常显区域。
+
+点击托盘图标打开/收起面板，右键可直接切账号/API、配置 Key 或退出。从托盘打开的面板会在点击别处时收起；从桌面打开的窗口保持显示。重复打开同一配置目录会唤回原窗口。
+
+窗口内快捷键：`Ctrl+M` 收进托盘，`Ctrl+Shift+M` 切换迷你窗口，`Ctrl+Q` 退出。无需为切换发送聊天消息。
+
+![迷你窗口](docs/images/mini.png)
+
+截图由真实 QML 界面在隔离配置下离屏渲染。
 
 ## 命令行
 

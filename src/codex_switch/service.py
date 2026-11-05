@@ -108,13 +108,11 @@ class SwitchService:
             backup = self.config.commit(original, updated)
             return {"changed": True, "backup": backup, **self.status()}
 
-    def setup(self, key, initial_model="gpt-6.1-sol"):
+    def setup(self, key):
         if key is not None:
             key = key.strip()
             if not key or any(c.isspace() or ord(c) < 32 for c in key) or len(key.encode("utf-8")) > 2560:
                 raise SwitchError("API key cannot be empty or contain spaces/control characters.")
-        if initial_model and any(c.isspace() for c in initial_model):
-            raise SwitchError("Model ID cannot contain whitespace.")
         with lock(self.home):
             original = self.config.read()
             expected = parse(original)
@@ -133,15 +131,11 @@ class SwitchService:
                          "timeout_ms": 15000, "refresh_interval_ms": 300000},
             }
             providers[PROVIDER] = provider
-            if "model" not in expected and initial_model:
-                expected["model"] = initial_model
 
             def change(doc):
                 if "model_providers" not in doc:
                     doc["model_providers"] = {}
                 doc["model_providers"][PROVIDER] = provider
-                if "model" not in doc and initial_model:
-                    doc["model"] = initial_model
 
             updated = patch(original, change)
             if parse(updated) != expected:
