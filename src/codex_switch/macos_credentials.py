@@ -16,7 +16,7 @@ class MacOSCredentials:
         if sys.platform != "darwin":
             raise SwitchError("macOS Keychain requires macOS.")
         self.target = target_for(home)
-        self.trusted_paths = sorted({str(Path(p).resolve()) for p in [sys.executable, *trusted_paths] if p})
+        self.trusted_paths = sorted({str(Path(p).resolve()) for p in trusted_paths if p})
         for executable in tuple(self.trusted_paths):
             path = Path(executable)
             if path.parent.name == "Helpers" and path.parent.parent.name == "Contents":
@@ -100,10 +100,12 @@ class MacOSCredentials:
 
     def _access(self, owned):
         applications = []
-        for path in self.trusted_paths:
+        # NULL identifies the actual caller. Python.org's macOS launcher path in
+        # sys.executable can differ from the process binary checked by Keychain.
+        for path in [None, *self.trusted_paths]:
             self._trace("authorize binary")
             application = ct.c_void_p()
-            self._check(self.security.SecTrustedApplicationCreateFromPath(path.encode("utf-8"), ct.byref(application)))
+            self._check(self.security.SecTrustedApplicationCreateFromPath(path.encode("utf-8") if path else None, ct.byref(application)))
             owned.append(application.value)
             applications.append(application.value)
         values = (ct.c_void_p * len(applications))(*applications)
