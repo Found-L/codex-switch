@@ -10,9 +10,10 @@ destination = root / "dist" / "CodexSwitch" / "licenses"
 destination.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(Path(sys.base_prefix) / "LICENSE.txt", destination / "PYTHON-LICENSE.txt")
 tcl = Path(tkinter.Tcl().eval("info library"))
-tk_license = tcl.parent / "tk8.6" / "license.terms"
-if not tk_license.is_file():
-    raise SystemExit("Tcl/Tk license file not found.")
+tk_license = next(tcl.parent.glob("tk*/license.terms"), None)
+if tk_license is None:
+    # Hosted Python distributions may omit non-runtime license files.
+    tk_license = root / "third_party" / "TCL-TK-LICENSE.txt"
 shutil.copyfile(tk_license, destination / "TCL-TK-LICENSE.txt")
 for name in ("tomlkit", "pyinstaller"):
     distribution = importlib.metadata.distribution(name)

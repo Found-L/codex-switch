@@ -1,7 +1,9 @@
 """Small bilingual desktop UI. Keys never leave the masked setup form/store."""
 import os
+import json
 from pathlib import Path
 import sys
+import tempfile
 import tkinter as tk
 from tkinter import messagebox
 import webbrowser
@@ -298,3 +300,27 @@ def run(home=None):
         text = str(error) if isinstance(error, SwitchError) else "Cannot start Codex Switch. Check permissions or reinstall."
         messagebox.showerror("Codex Switch", text, parent=root)
         root.destroy()
+
+
+def self_test(report):
+    """Build the real frozen UI without opening a window or accessing user secrets."""
+    root = None
+    try:
+        class NoCredentials:
+            def read(self):
+                return None
+
+        with tempfile.TemporaryDirectory(prefix="codex-switch-gui-") as home:
+            root = tk.Tk()
+            root.withdraw()
+            App(root, SwitchService(Path(home), credentials=NoCredentials(), track=False))
+            root.update_idletasks()
+            result = {"ok": True, "version": __version__, "tcl": root.tk.call("info", "patchlevel"),
+                      "tk": root.tk.call("package", "provide", "Tk")}
+    except Exception as error:
+        result = {"ok": False, "error_type": type(error).__name__}
+    finally:
+        if root is not None:
+            root.destroy()
+    Path(report).write_text(json.dumps(result), encoding="utf-8")
+    return 0 if result["ok"] else 1

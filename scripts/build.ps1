@@ -1,4 +1,4 @@
-param([string]$Version = '0.1.0', [switch]$SkipInstaller, [string]$IsccPath)
+param([string]$Version = '0.1.1', [switch]$SkipInstaller, [string]$IsccPath)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
@@ -15,6 +15,8 @@ try {
     Copy-Item -LiteralPath 'dist\codex-switch.exe' -Destination 'dist\CodexSwitch\codex-switch.exe' -Force
     Copy-Item -LiteralPath 'README.md','README.en.md','LICENSE','THIRD_PARTY_NOTICES.md' -Destination 'dist\CodexSwitch' -Force
     Copy-Item -LiteralPath 'docs' -Destination 'dist\CodexSwitch' -Recurse -Force
+    & $python 'scripts\gui_smoke.py' 'dist\CodexSwitch\CodexSwitch.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged GUI startup failed.' }
     & $python 'scripts\collect_licenses.py'
     if ($LASTEXITCODE -ne 0) { throw 'License collection failed.' }
     & $python 'scripts\smoke.py' 'dist\CodexSwitch\codex-switch.exe'
