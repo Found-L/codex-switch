@@ -7,7 +7,7 @@ import sys
 root = Path(__file__).resolve().parents[1]
 destination = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "dist" / "CodexSwitch" / "licenses"
 destination.mkdir(parents=True, exist_ok=True)
-python_license = next((path for path in (Path(sys.base_prefix) / "LICENSE.txt", Path(sys.base_prefix) / "Resources" / "LICENSE.txt") if path.is_file()), None)
+python_license = next((path for path in (Path(sys.base_prefix) / "LICENSE.txt", Path(sys.base_prefix) / "Resources" / "LICENSE.txt", root / "third_party" / "PYTHON-LICENSE.txt") if path.is_file()), None)
 if python_license is None:
     raise SystemExit("Python license is missing from the build interpreter.")
 shutil.copyfile(python_license, destination / "PYTHON-LICENSE.txt")

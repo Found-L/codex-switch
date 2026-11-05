@@ -24,7 +24,7 @@ def main():
     architecture = "arm64" if platform.machine() == "arm64" else "x64"
     target = "arm64" if architecture == "arm64" else "x86_64"
     identity = os.environ.get("MACOS_SIGN_IDENTITY", "-")
-    run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v")
+    run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v", timeout=120)
     run(sys.executable, "scripts/make_icon.py")
     common = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--target-arch", target, "--paths", "src"]
     run(*common, "--onefile", "--console", "--name", "codex-switch", "--exclude-module", "PySide6",
@@ -90,7 +90,7 @@ app = BUNDLE(coll, name='Codex Switch.app', icon={str(ROOT / "assets/codex-switc
             run("/usr/bin/xcrun", "stapler", "staple", dmg)
             run("/usr/bin/xcrun", "stapler", "validate", dmg)
     # The installer check copies the app from the actual mounted DMG before setup.
-    run(sys.executable, "scripts/macos_installer_smoke.py", dmg)
+    run(sys.executable, "scripts/macos_installer_smoke.py", dmg, timeout=180)
     checksum = hashlib.sha256(dmg.read_bytes()).hexdigest()
     (release / f"SHA256SUMS-macos-{architecture}.txt").write_text(checksum + "  " + dmg.name + "\n", encoding="utf-8")
     print(f"Built macOS {architecture}: {dmg.name}; signing={'Developer ID' if identity != '-' else 'ad-hoc'}; notarized={all(notary)}")

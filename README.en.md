@@ -56,7 +56,7 @@ Setup is local and does not send requests to verify API access. Model availabili
 
 The per-user installer adds an optional desktop shortcut and user PATH entry. Uninstallation first detaches this tool's managed provider, switches a managed active API config back to `openai`, and removes its keys for registered homes. Account login and local backups remain; external legacy providers are left intact. For portable builds, run `codex-switch remove-api --yes` before deleting files. If permissions/config errors prevent safe cleanup, repair the affected home before uninstalling.
 
-This is an independent community tool, not an OpenAI product. It bundles neither Codex nor API keys. Release binaries are not code-signed; SHA-256 checksums are provided.
+This is an independent community tool, not an OpenAI product. It bundles neither Codex nor API keys. Windows binaries have no commercial code signature. Mac builds without Developer ID credentials are ad-hoc signed and not notarized. SHA-256 checksums are provided.
 
 On Mac, run `codex-switch uninstall --yes` before deleting the app. This removes managed providers/keys, launcher and shell PATH blocks, preserving account login and backups. `uninstall-cli` removes terminal integration only.
 
