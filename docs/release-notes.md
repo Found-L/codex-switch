@@ -1,3 +1,16 @@
+## Codex Switch v0.4.0
+
+- API 配置支持自定义 HTTPS Base URL，可接 New API、多供应商网关和 DeepSeek 等兼容 Responses 的接口。
+- 新增「模型」页：同步名单、逐模型启用与能力设置、默认模型、应用目录及撤销；CLI 同步支持 `models sync/list/configure/apply/reset`。
+- 同步只 GET 模型名单，不发送推理请求；新模型默认关闭，所有网关模型均标明兼容性未验证。通用目录不开放 Fast / Ultrafast / Ultra，不从别名猜厂商或能力。
+- API 目录与账号模型设置隔离，切回账号恢复原模型、目录、速度、推理及上下文；MCP、插件和账号登录保留。
+- 地址变更要求重新输入对应 Key，Key 变更清除旧名单；模型查询拒绝重定向、保留 TLS 校验与响应大小限制。
+- 模型目录在本机 Codex `0.166.0-alpha.6` app-server 完成实际读取验证，无模型调用。首次应用和更新目录后请重载 Codex 刷新菜单。
+
+Windows/macOS custom API endpoints and opt-in gateway model catalogs. Discovery is GET-only, capability metadata is user-configured, inference compatibility is untested, and account settings restore when switching back. Reload Codex for catalog changes. Mac builds without Developer ID credentials remain ad-hoc signed, not notarized.
+
+完整说明：[New API 与模型同步](https://github.com/Found-L/codex-switch/blob/main/docs/gateways.md)。
+
 ## Codex Switch v0.3.0
 
 - 新增 macOS 14+ Apple Silicon 和 Intel 原生 DMG：拖入 Applications 后引导配置自己的 Key。

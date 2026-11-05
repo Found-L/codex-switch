@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QObject, Property, QEvent, QEventLoop, QSettings, QTimer, QUrl, Signal, Slot, Qt
+from PySide6.QtCore import QObject, Property, QEvent, QEventLoop, QMetaObject, QSettings, QTimer, QUrl, Signal, Slot, Qt
 from PySide6.QtGui import QAction, QCursor, QDesktopServices, QFont, QFontDatabase, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtQml import QQmlApplicationEngine
@@ -203,11 +203,20 @@ class Bridge(QObject):
         if result["error"]:
             self._set_notice(result["error"], True)
         elif result["kind"] in ("switch", "setup"):
-            name = "OpenAI API" if self._state["mode"] == "api" else self.tr_text("Codex 账号", "Codex account")
+            name = self._state.get("api_label", "API") if self._state["mode"] == "api" else self.tr_text("Codex 账号", "Codex account")
             self._set_notice(self.tr_text("已切换到 " + name + "，请新建会话。", "Switched to " + name + ". Start a new chat."))
             if result["kind"] == "setup":
                 self.keySaved.emit()
-                self.openPage.emit("connections")
+                self.openPage.emit("models" if self._state.get("base_url") != "https://api.openai.com/v1" else "connections")
+                self._set_notice(self.tr_text("API 已保存。自定义接口请同步并配置模型。", "API saved. Discover and configure models for custom endpoints."))
+        elif result["kind"] == "sync-models":
+            self._set_notice(self.tr_text("已获取模型名单，请配置需要使用的编程模型。", "Models discovered. Configure the coding models you want to use."))
+        elif result["kind"] == "configure-model":
+            self._set_notice(self.tr_text("模型设置已保存，请应用目录。", "Model settings saved. Apply the catalog next."))
+        elif result["kind"] == "apply-models":
+            self._set_notice(self.tr_text("目录已应用。请重载 Codex 刷新菜单；未进行模型调用验证。", "Catalog applied. Reload Codex to refresh the menu. Inference is untested."))
+        elif result["kind"] == "reset-models":
+            self._set_notice(self.tr_text("已撤销自定义模型目录，API 配置仍保留。请重载 Codex。", "Custom catalog reset. API connection retained. Reload Codex."))
         elif result["kind"] == "install-cli":
             self._set_notice(self.tr_text("终端命令已安装，请重新打开终端。", "Terminal command installed. Open a new terminal."))
         if self._quit_when_idle:
@@ -223,19 +232,56 @@ class Bridge(QObject):
             self.openPage.emit("key")
             self.show_window()
             return
+        if mode == "api" and self._state.get("base_url") != "https://api.openai.com/v1" and not self._state.get("catalog_enabled"):
+            if self._compact:
+                self.toggleCompact()
+            self.openPage.emit("models")
+            self.show_window()
+            return
         self._submit(lambda: self.service.use(mode), "switch")
 
     @Slot(str)
     def saveKey(self, key):
+        self.saveConnection(key, self._state.get("base_url", "https://api.openai.com/v1"))
+
+    @Slot(str, str)
+    def saveConnection(self, key, base_url):
         if not key.strip() and not self._state.get("key_saved"):
             self._set_notice(self.tr_text("请先输入 API Key。", "Enter an API key first."), True)
             return
 
         def save():
-            self.service.setup(key if key.strip() else None)
-            self.service.use("api")
+            self.service.setup(key if key.strip() else None, base_url)
+            state = self.service.status()
+            if state["base_url"] == "https://api.openai.com/v1" or state["catalog_enabled"]:
+                self.service.use("api")
 
         self._submit(save, "setup")
+
+    @Slot()
+    def syncModels(self):
+        self._submit(self.service.sync_models, "sync-models")
+
+    @Slot()
+    def resetModels(self):
+        self._submit(self.service.reset_models, "reset-models")
+
+    @Slot(str, bool, str, str, bool)
+    def configureModel(self, model, enabled, context, reasoning, images):
+        def save():
+            try:
+                count = int(context)
+            except ValueError:
+                raise SwitchError("Context window must be an integer.") from None
+            self.service.configure_model(model, enabled, count, [e.strip() for e in reasoning.split(",") if e.strip()], images)
+        self._submit(save, "configure-model")
+
+    @Slot(str)
+    def applyModels(self, default_model):
+        def apply():
+            self.service.apply_models(default_model or None)
+            self.service.use("api")
+        self._submit(apply, "apply-models")
 
     @Slot()
     def refresh(self):
@@ -318,11 +364,11 @@ class Bridge(QObject):
     def _update_tray(self):
         if not self.tray:
             return
-        name = "OpenAI API" if self._state["mode"] == "api" else self.tr_text("Codex 账号", "Codex account")
+        name = self._state.get("api_label", "API") if self._state["mode"] == "api" else self.tr_text("Codex 账号", "Codex account")
         self.tray.setToolTip("Codex Switch · " + name)
         self.open_action.setText(self.tr_text("打开面板", "Open panel"))
         self.compact_action.setText(self.tr_text("迷你窗口" if not self._compact else "完整面板", "Mini window" if not self._compact else "Full panel"))
-        for mode, title in (("account", self.tr_text("Codex 账号", "Codex account")), ("api", "OpenAI API")):
+        for mode, title in (("account", self.tr_text("Codex 账号", "Codex account")), ("api", self._state.get("api_label", "API"))):
             action = self.provider_actions[mode]
             action.setText(title)
             action.setChecked(self._state["mode"] == mode)
@@ -503,7 +549,7 @@ def self_test(report, native=False):
             engine, window = load_scene(model)
             window.show()
             app.processEvents()
-            names = ("connectionsPage", "keyPage", "terminalPage", "selectionPill", "apiKeyField")
+            names = ("connectionsPage", "keyPage", "terminalPage", "modelsPage", "selectionPill", "apiKeyField", "gatewayModelChoice")
             objects = {name: window.findChild(QObject, name) for name in names}
             if not all(objects.values()):
                 raise RuntimeError("Required persistent controls are missing.")
@@ -533,14 +579,14 @@ def self_test(report, native=False):
             for name, original in objects.items():
                 if window.findChild(QObject, name) is not original:
                     raise RuntimeError("A state update rebuilt the scene.")
-            for page in ("key", "terminal", "connections"):
+            for page in ("key", "models", "terminal", "connections"):
                 samples = []
                 loop = QEventLoop()
                 sample_timer = QTimer()
                 sample_timer.setInterval(8)
                 sample_timer.timeout.connect(lambda: samples.append(sum(
                     bool(objects[name].property("visible"))
-                    for name in ("connectionsPage", "keyPage", "terminalPage"))))
+                    for name in ("connectionsPage", "keyPage", "modelsPage", "terminalPage"))))
                 sample_timer.start()
                 model.openPage.emit(page)
                 QTimer.singleShot(300, loop.quit)
@@ -554,6 +600,37 @@ def self_test(report, native=False):
                 raise RuntimeError("Mini window geometry is incorrect.")
             if "model" in __import__("tomllib").loads(service.config.read().decode()):
                 raise RuntimeError("Setup unexpectedly wrote a model.")
+            # Exercise the actual asynchronous gateway flow without any external request.
+            from unittest.mock import patch as mock_patch
+            model.saveConnection("gateway-qt-fixture", "https://gateway.example/v1")
+            wait_idle()
+            fixture = [{"id": "gateway-coding-model", "enabled": False, "context_window": 32768,
+                        "reasoning": [], "images": False, "status": "unverified"},
+                       {"id": "gateway-second-model", "enabled": False, "context_window": 32768,
+                        "reasoning": [], "images": False, "status": "unverified"}]
+            with mock_patch("codex_switch.service.discover", return_value=fixture):
+                model.syncModels()
+                wait_idle()
+            choice = objects["gatewayModelChoice"]
+            choice.setProperty("currentIndex", 1)
+            choice.setProperty("selectedId", "gateway-second-model")
+            app.processEvents()
+            window.findChild(QObject, "gatewayEnable").setProperty("checked", True)
+            window.findChild(QObject, "gatewayContextField").setProperty("text", "65536")
+            window.findChild(QObject, "gatewayReasoningField").setProperty("text", "low,high")
+            QMetaObject.invokeMethod(window.findChild(QObject, "saveModelButton"), "clicked", Qt.DirectConnection)
+            wait_idle()
+            app.processEvents()
+            if choice.property("currentText") != "gateway-second-model":
+                raise RuntimeError("Model selection was lost while saving.")
+            QMetaObject.invokeMethod(window.findChild(QObject, "applyModelButton"), "clicked", Qt.DirectConnection)
+            wait_idle()
+            if model.state["model"] != "gateway-second-model" or not model.state["catalog_active"]:
+                raise RuntimeError("Gateway catalog was not applied.")
+            model.switchTo("account")
+            wait_idle()
+            if model.state["model"] or model.state["catalog_active"]:
+                raise RuntimeError("Account model settings were not restored.")
             server = instance_server(service.home, model)
             if server is None or instance_server(service.home, model) is not None:
                 raise RuntimeError("Single-instance activation did not work.")
@@ -563,6 +640,7 @@ def self_test(report, native=False):
                       "persistent_controls": True, "async_switching": True,
                       "page_transition_no_overlap": True,
                       "native_keychain": native,
+                      "gateway_catalog_flow": True,
                       "mini_window": True, "single_instance": True, "setup_entry_count": 1}
             model.shutdown()
             window.close()

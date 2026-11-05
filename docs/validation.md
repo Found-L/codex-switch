@@ -1,4 +1,13 @@
-# v0.3.0 验证范围
+# v0.4.0 验证范围
+
+- 39 项服务、凭据、模型目录与终端集成测试通过。新增真实 loopback HTTP 模型发现与重定向拒绝、地址/Key 绑定、旧令牌名单失效、列表变化、同步失败保护、目录应用失败回滚、账号模型设置恢复和目录撤销。
+- 源码 QML 离屏自检通过：真实模型控件保存/应用、异步网关流程、保存后选择保留、四页不重叠、常驻控件、迷你窗口、账号目录恢复。截图使用占位模型与隔离配置。
+- 实际安装的 Codex CLI `0.166.0-alpha.6`：隔离 `CODEX_HOME` 启动 app-server，通过 `model/list` 验证只返回两个自定义模型、配置的推理档位及空速度档位。未调用推理，未修改用户的 Codex 配置或重启 Codex。复现：`python scripts/catalog_smoke.py`（需本机已安装 Codex）。
+- 冻结 CLI 验证增加本地 HTTP 网关：Key → GET 名单 → 配置两个模型 → 默认模型 → 应用目录 → 账号/API 往返 → reset → 卸载。冻结 GUI 增加对应模型控件自检，三平台构建会运行。
+
+网关名单不等于逐模型调用验证。没有使用真实 New API / DeepSeek 凭据，也没有验证付费调用、供应商身份或真实聊天菜单热更新。生成目录采用通用指令及用户配置的能力；不自动导入完整上游目录。目录刷新需重载 Codex。平台打包与 CI 的本次结果以发布工作流记录为准。
+
+## v0.3.0 历史验证
 
 流水线：[Desktop builds](https://github.com/Found-L/codex-switch/actions/workflows/release.yml)。发布任务依赖 Windows、macOS arm64 和 macOS x86_64 三个构建全部成功。
 

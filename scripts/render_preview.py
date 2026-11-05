@@ -41,6 +41,19 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-render-") as home:
     bridge.openPage.emit("terminal")
     settle()
     window.grabWindow().save(str(destination / "terminal.png"))
+    from unittest.mock import patch
+    service.setup("gateway-fixture", "https://gateway.example/v1")
+    entries = [{"id": name, "enabled": False, "context_window": 32768, "reasoning": [], "images": False, "status": "unverified"}
+               for name in ("deepseek-flash", "gpt-6.1-sol", "claude-example")]
+    with patch("codex_switch.service.discover", return_value=entries):
+        service.sync_models()
+    bridge.refresh()
+    settle()
+    bridge.openPage.emit("models")
+    settle()
+    window.grabWindow().save(str(destination / "models.png"))
+    bridge.openPage.emit("terminal")
+    settle()
     bridge.toggleLanguage()
     settle()
     window.grabWindow().save(str(destination / "terminal-en.png"))

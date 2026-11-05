@@ -15,6 +15,7 @@ Window {
     property string displayedPage: ""
     property bool sceneReady: false
     property bool showKey: false
+    property bool showAdvanced: false
     readonly property color accent: "#6055da"
     readonly property color ink: "#252938"
     readonly property color muted: "#858998"
@@ -83,6 +84,21 @@ Window {
         MouseArea { id: hit; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: control.clicked() }
     }
 
+    component CatalogField: TextField {
+        leftPadding: 12; color: root.ink; font.family: bridge.fontFamily
+        background: Rectangle { radius: 9; color: "white"; border.color: parent.activeFocus ? root.accent : "#dfe3ee" }
+    }
+    component CatalogCheck: CheckBox {
+        id: checkControl
+        leftPadding: 0; spacing: 9; height: 30
+        indicator: Rectangle {
+            x: 0; anchors.verticalCenter: parent.verticalCenter; width: 19; height: 19; radius: 6
+            color: checkControl.checked ? root.accent : "white"; border.color: checkControl.checked ? root.accent : "#cdd2e1"
+            Text { anchors.centerIn: parent; text: "✓"; visible: checkControl.checked; color: "white"; font.family: bridge.fontFamily; font.pixelSize: 13 }
+        }
+        contentItem: Text { text: checkControl.text; leftPadding: 28; verticalAlignment: Text.AlignVCenter; color: root.ink; font: checkControl.font }
+    }
+
     component GlyphButton: Rectangle {
         id: glyphControl
         property string kind: "close"
@@ -134,7 +150,7 @@ Window {
                 required property int index
                 readonly property bool selected: (modelData === "api") === root.api
                 Accessible.role: Accessible.RadioButton
-                Accessible.name: modelData === "api" ? "OpenAI API" : root.t("Codex 账号", "Codex account")
+                Accessible.name: modelData === "api" ? (bridge.state.api_label || "API") : root.t("Codex 账号", "Codex account")
                 Accessible.checked: selected
                 Accessible.onPressAction: bridge.switchTo(modelData)
                 x: 4 + index * (picker.width - 8) / 2; y: 4
@@ -147,7 +163,7 @@ Window {
                 }
                 Text {
                     x: 14; y: picker.mini ? 32 : 42
-                    text: choice.modelData === "api" ? "OpenAI API" : root.t("Codex 账号", "Codex account")
+                    text: choice.modelData === "api" ? (bridge.state.api_label || "API") : root.t("Codex 账号", "Codex account")
                     color: choice.selected ? root.ink : "#7d8292"
                     font.family: bridge.fontFamily; font.pixelSize: picker.mini ? 12 : 14; font.weight: Font.DemiBold
                 }
@@ -212,15 +228,15 @@ Window {
             visible: !bridge.compact
             x: 24; y: 84; width: parent.width - 48; height: 38; radius: 12; color: "#edeef5"
             Rectangle {
-                x: 3 + (root.page === "connections" ? 0 : root.page === "key" ? 1 : 2) * (tabs.width - 6) / 3
-                y: 3; width: (tabs.width - 6) / 3; height: 32; radius: 9; color: "white"; border.color: "#e2e4ec"
+                x: 3 + (root.page === "connections" ? 0 : root.page === "key" ? 1 : root.page === "models" ? 2 : 3) * (tabs.width - 6) / 4
+                y: 3; width: (tabs.width - 6) / 4; height: 32; radius: 9; color: "white"; border.color: "#e2e4ec"
                 Behavior on x { NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
             }
             Repeater {
-                model: [{key:"connections",zh:"连接",en:"Connection"},{key:"key",zh:"API Key",en:"API key"},{key:"terminal",zh:"终端",en:"Terminal"}]
+                model: [{key:"connections",zh:"连接",en:"Connection"},{key:"key",zh:"API 配置",en:"API setup"},{key:"models",zh:"模型",en:"Models"},{key:"terminal",zh:"终端",en:"Terminal"}]
                 Item {
                     required property var modelData; required property int index
-                    x: 3 + index * (tabs.width - 6) / 3; width: (tabs.width - 6) / 3; height: 38
+                    x: 3 + index * (tabs.width - 6) / 4; width: (tabs.width - 6) / 4; height: 38
                     Text { anchors.centerIn: parent; text: root.t(modelData.zh,modelData.en); color: root.page === modelData.key ? root.ink : "#8a8e9d"; font.family: bridge.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.page = modelData.key }
                 }
@@ -240,14 +256,14 @@ Window {
                 Rectangle {
                     width: parent.width; height: 144; radius: 18; color: "white"; border.color: "#e4e6ef"
                     Text { x: 20; y: 18; text: root.t("当前连接配置", "CURRENT CONFIGURATION"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10; font.letterSpacing: 0.4 }
-                    Text { x: 20; y: 43; text: root.api ? "OpenAI API" : bridge.state.mode === "other" ? root.t("其他提供商", "Other provider") : root.t("Codex 账号", "Codex account"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 26; font.weight: Font.DemiBold }
+                    Text { x: 20; y: 43; text: root.api ? (bridge.state.api_label || "API") : bridge.state.mode === "other" ? root.t("其他提供商", "Other provider") : root.t("Codex 账号", "Codex account"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 26; font.weight: Font.DemiBold }
                     Rectangle { x: 21; y: 96; width: 6; height: 6; radius: 3; color: bridge.busy ? "#c5bded" : "#77b499"; Behavior on color { ColorAnimation { duration: 160 } } }
                     Text { x: 35; y: 91; text: bridge.busy ? root.t("正在保存切换…", "Saving your connection…") : root.api ? root.t("使用自己的 Key，API 单独计费", "Your API key. Separate API billing.") : root.t("沿用 Codex 中的账号登录", "Use the account signed in to Codex."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11 }
                 }
                 ConnectionPicker { y: 162; width: parent.width }
                 SoftButton { x: 0; y: 280; width: parent.width - 52; height: 40; text: root.t("管理 API Key", "Manage API key"); onClicked: root.page = "key" }
                 SoftButton { x: parent.width - 42; y: 280; width: 42; height: 40; refreshIcon: true; enabled: !bridge.busy; onClicked: bridge.refresh() }
-                Text { y: 340; text: root.t("模型与推理档位在 Codex 中选择", "Choose models and reasoning in Codex."); color: "#a0a4b1"; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                Text { y: 340; text: root.t("自定义接口请先在「模型」页同步并应用目录", "For gateways, sync and apply the Models catalog first."); color: "#a0a4b1"; font.family: bridge.fontFamily; font.pixelSize: 10 }
             }
 
             Item {
@@ -255,31 +271,116 @@ Window {
                 objectName: "keyPage"
                 anchors.fill: parent
                 visible: root.displayedPage === "key"
-                Text { text: root.t("连接你的 OpenAI API", "Connect your OpenAI API"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 21; font.weight: Font.DemiBold }
-                Text { y: 37; width: parent.width; text: root.t("只需配置一次，之后随时切换。", "Set up once. Switch whenever you need."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap }
-                Text { y: 86; text: "OpenAI API Key"; color: "#656b7b"; font.family: bridge.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold }
+                Text { text: root.t("连接你的 API", "Connect your API"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 21; font.weight: Font.DemiBold }
+                Text { y: 37; width: parent.width; text: root.t("支持 OpenAI、DeepSeek 和 New API 网关。", "OpenAI, DeepSeek and New API gateways."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap }
+                Text { y: 68; text: "Base URL"; color: "#656b7b"; font.family: bridge.fontFamily; font.pixelSize: 11 }
+                TextField {
+                    id: urlField
+                    objectName: "baseUrlField"
+                    y: 88; width: parent.width; height: 40; leftPadding: 12
+                    text: bridge.state.base_url || "https://api.openai.com/v1"
+                    placeholderText: "https://your-gateway/v1"
+                    enabled: !bridge.busy; selectByMouse: true
+                    font.family: bridge.fontFamily; font.pixelSize: 11; color: root.ink
+                    background: Rectangle { radius: 10; color: "white"; border.color: urlField.activeFocus ? root.accent : "#dfe3ee" }
+                }
+                Text { y: 145; text: "API Key"; color: "#656b7b"; font.family: bridge.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold }
                 TextField {
                     id: keyField
                     objectName: "apiKeyField"
-                    x: 0; y: 110; width: parent.width; height: 48
+                    x: 0; y: 165; width: parent.width; height: 44
                     leftPadding: 14; rightPadding: 62
                     font.family: bridge.fontFamily; font.pixelSize: 13
                     color: root.ink; placeholderText: bridge.state.key_saved ? root.t("已保存，留空保留原 Key", "Saved. Leave blank to keep it.") : "sk-…"
                     echoMode: root.showKey ? TextInput.Normal : TextInput.Password
                     enabled: !bridge.busy
                     background: Rectangle { radius: 12; color: "white"; border.color: keyField.activeFocus ? root.accent : "#dfe3ee"; Behavior on border.color { ColorAnimation { duration: 150 } } }
-                    onAccepted: bridge.saveKey(text)
+                    onAccepted: bridge.saveConnection(text, urlField.text)
                 }
                 Text {
-                    x: parent.width - 54; y: 127; width: 48; horizontalAlignment: Text.AlignHCenter
+                    x: parent.width - 54; y: 180; width: 48; horizontalAlignment: Text.AlignHCenter
                     text: root.showKey ? root.t("隐藏", "Hide") : root.t("显示", "Show")
                     color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10
                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.showKey = !root.showKey }
                 }
-                Text { y: 174; width: parent.width; text: bridge.isMac ? root.t("Key 保存在当前用户的 macOS 钥匙串中。", "Stored in your macOS login Keychain.") : root.t("Key 保存在当前 Windows 用户的凭据管理器中。", "Stored in Windows Credential Manager for your user."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
-                SoftButton { y: 232; width: parent.width; primary: true; text: bridge.busy ? root.t("正在保存…", "Saving…") : root.t("保存并使用 API", "Save and use API"); enabled: !bridge.busy; onClicked: bridge.saveKey(keyField.text) }
-                Text { y: 296; text: root.t("创建 OpenAI API Key ↗", "Create an OpenAI API key ↗"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("key") } }
-                Text { y: 332; text: root.t("还没有 Codex？查看安装说明 ↗", "Need Codex? Open the installation guide ↗"); color: "#9a9fac"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("codex") } }
+                Text { y: 223; width: parent.width; text: bridge.isMac ? root.t("Key 保存在当前用户的 macOS 钥匙串中。", "Stored in your macOS login Keychain.") : root.t("Key 保存在当前 Windows 用户的凭据管理器中。", "Stored in Windows Credential Manager for your user."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                SoftButton { y: 267; width: parent.width; primary: true; text: bridge.busy ? root.t("正在保存…", "Saving…") : root.t("保存 API 配置", "Save API connection"); enabled: !bridge.busy; onClicked: bridge.saveConnection(keyField.text, urlField.text) }
+                Text { y: 328; text: root.t("创建 OpenAI API Key ↗", "Create an OpenAI API key ↗"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("key") } }
+                Text { y: 355; text: root.t("还没有 Codex？查看安装说明 ↗", "Need Codex? Open the installation guide ↗"); color: "#9a9fac"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("codex") } }
+            }
+
+            Item {
+                id: modelsPage
+                objectName: "modelsPage"
+                anchors.fill: parent
+                visible: root.displayedPage === "models"
+                ScrollView {
+                    anchors.fill: parent
+                    anchors.bottomMargin: 104
+                    clip: true
+                    contentWidth: availableWidth
+                    Column {
+                        width: parent.width; spacing: 10
+                        Text { text: root.t("网关模型目录", "Gateway model catalog"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
+                        Text { width: parent.width; wrapMode: Text.WordWrap; text: root.t("同步只获取名单，不调用模型。请仅启用支持 Responses 和工具调用的编程模型。", "Discovery lists models without inference. Enable only coding models supporting Responses and tool calls."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11 }
+                        SoftButton { width: parent.width; height: 36; text: bridge.busy ? root.t("处理中…", "Working…") : root.t("从 API 同步模型", "Discover API models"); enabled: !bridge.busy && bridge.state.api_ready; onClicked: bridge.syncModels() }
+                        Text { width: parent.width; wrapMode: Text.WordWrap; text: root.t("已列出 ", "Listed: ") + (bridge.state.models || []).length + root.t(" 个 · 兼容性未验证", " · compatibility untested") + (bridge.state.catalog_dirty ? root.t(" · 待应用", " · unapplied") : ""); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                        ComboBox {
+                            id: modelChoice
+                            objectName: "gatewayModelChoice"
+                            width: parent.width; height: 38
+                            model: bridge.state.models || []
+                            textRole: "id"
+                            property string selectedId: ""
+                            onActivated: selectedId = currentText
+                            onModelChanged: Qt.callLater(function() {
+                                if (selectedId) {
+                                    for (let i = 0; i < count; ++i) {
+                                        if (model[i].id === selectedId) { currentIndex = i; break }
+                                    }
+                                }
+                            })
+                            property var selected: currentIndex >= 0 && currentIndex < count ? model[currentIndex] : null
+                            onSelectedChanged: {
+                                enabledModel.checked = selected ? selected.enabled : false
+                                contextField.text = selected ? String(selected.context_window) : "32768"
+                                reasoningField.text = selected ? selected.reasoning.join(",") : ""
+                                imagesModel.checked = selected ? selected.images : false
+                            }
+                            enabled: !bridge.busy && count > 0
+                            font.family: bridge.fontFamily; font.pixelSize: 11
+                            background: Rectangle { radius: 10; color: "white"; border.color: "#dfe3ee" }
+                            contentItem: Text { text: modelChoice.displayText; leftPadding: 12; rightPadding: 28; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; color: root.ink; font: modelChoice.font }
+                            indicator: Canvas { x: parent.width - 27; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; onPaint: { const c=getContext("2d"); c.strokeStyle="#858998"; c.lineWidth=1.5; c.beginPath(); c.moveTo(4,6); c.lineTo(8,10); c.lineTo(12,6); c.stroke() } }
+                        }
+                        CatalogCheck { id: enabledModel; objectName: "gatewayEnable"; text: root.t("将此模型加入 Codex 菜单", "Include this model in Codex"); enabled: !bridge.busy && modelChoice.count > 0; font.family: bridge.fontFamily; font.pixelSize: 12 }
+                        Text {
+                            width: parent.width; text: root.showAdvanced ? root.t("收起能力设置 -", "Hide capability settings -") : root.t("能力设置：上下文 / 推理 / 图片 +", "Capabilities: context / reasoning / images +")
+                            color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.showAdvanced = !root.showAdvanced }
+                        }
+                        Column {
+                            width: parent.width; spacing: 8; visible: root.showAdvanced
+                        Text { text: root.t("上下文 tokens（按实际模型填写）", "Context tokens (set the actual model limit)"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                        CatalogField { id: contextField; objectName: "gatewayContextField"; width: parent.width; height: 34; text: "32768"; enabled: !bridge.busy; selectByMouse: true; font.pixelSize: 12; validator: IntValidator { bottom: 4096; top: 4000000 } }
+                        Text { text: root.t("支持的推理档位，逗号分隔；未知则留空", "Reasoning levels, comma-separated; leave blank if unknown"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                        CatalogField { id: reasoningField; objectName: "gatewayReasoningField"; width: parent.width; height: 34; enabled: !bridge.busy; placeholderText: "low,medium,high"; selectByMouse: true; font.pixelSize: 12 }
+                        CatalogCheck { id: imagesModel; text: root.t("此模型及渠道支持图片输入", "This model and route support image input"); enabled: !bridge.busy; font.family: bridge.fontFamily; font.pixelSize: 12 }
+                        }
+                        Text { width: parent.width; wrapMode: Text.WordWrap; text: root.t("未设置能力时使用 32K、仅文本、无推理档位。请按渠道实际能力调整，兼容性未验证。", "Default: 32K, text only, no reasoning levels. Adjust to actual route capabilities. Compatibility is untested."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                        Text {
+                            visible: bridge.state.catalog_enabled; text: root.t("撤销自定义目录，保留 API 配置", "Reset custom catalog; keep API connection")
+                            color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10
+                            MouseArea { anchors.fill: parent; enabled: !bridge.busy; cursorShape: Qt.PointingHandCursor; onClicked: bridge.resetModels() }
+                        }
+                        Text { width: parent.width; wrapMode: Text.WordWrap; text: root.t("先保存每个模型，再应用。新增模型默认关闭。使用通用编程指令，Fast / Ultra 不开放；配置后重载 Codex 刷新菜单。账号设置会在切回时恢复。", "Save each model before applying. New entries start disabled. Generic coding instructions; Fast / Ultra disabled. Reload Codex after applying. Account settings restore when switching back."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                    }
+                }
+                Column {
+                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; spacing: 8
+                        SoftButton { objectName: "saveModelButton"; width: parent.width; height: 36; text: root.t("保存此模型设置", "Save model settings"); enabled: !bridge.busy && modelChoice.count > 0; onClicked: bridge.configureModel(modelChoice.currentText, enabledModel.checked, contextField.text, reasoningField.text, imagesModel.checked) }
+                        SoftButton { objectName: "applyModelButton"; width: parent.width; height: 40; primary: true; text: root.t("以当前模型为默认并应用", "Apply with selected model as default"); enabled: !bridge.busy && modelChoice.count > 0; onClicked: bridge.applyModels(modelChoice.currentText) }
+                }
             }
 
             Item {
@@ -311,7 +412,7 @@ Window {
             visible: bridge.compact
             x: 20; y: 76; width: parent.width - 40; height: parent.height - 88
             Text { text: root.t("当前连接配置", "CURRENT CONFIGURATION"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
-            Text { y: 21; text: root.api ? "OpenAI API" : bridge.state.mode === "other" ? root.t("其他提供商", "Other provider") : root.t("Codex 账号", "Codex account"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 22; font.weight: Font.DemiBold }
+            Text { y: 21; text: root.api ? (bridge.state.api_label || "API") : bridge.state.mode === "other" ? root.t("其他提供商", "Other provider") : root.t("Codex 账号", "Codex account"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 22; font.weight: Font.DemiBold }
             ConnectionPicker { y: 65; width: parent.width; mini: true }
             Text { y: 146; width: parent.width; text: bridge.busy ? root.t("正在保存…", "Saving…") : bridge.notice; color: bridge.isError ? "#bd5363" : "#4c9379"; font.family: bridge.fontFamily; font.pixelSize: 9; elide: Text.ElideRight }
             Text { y: 170; text: root.t("展开完整面板 ↗", "Open the full panel ↗"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.toggleCompact() } }
@@ -329,7 +430,7 @@ Window {
             wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
             Behavior on opacity { NumberAnimation { duration: 150 } }
         }
-        Text { visible: !bridge.compact; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: root.t("新建会话使用，已有会话保留原连接。", "New chats use this connection. Existing chats keep theirs."); color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
+        Text { visible: !bridge.compact; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: root.t("连接供新会话使用；目录更新需重载 Codex。", "New chats use this connection. Reload Codex for catalogs."); color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
         Text { visible: !bridge.compact; anchors.right: parent.right; anchors.rightMargin: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: bridge.language === "zh" ? "EN" : "中"; color: "#8c90a0"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.toggleLanguage() } }
     }
 }

@@ -2,7 +2,7 @@
 
 English · [简体中文](README.md)
 
-A Windows/macOS app and CLI for switching Codex between an existing account login and your own OpenAI API key.
+A Windows/macOS app and CLI for switching Codex between an existing account login and an API connection, including official OpenAI, DeepSeek and Responses-compatible New API gateways.
 
 **[Download the installer / portable ZIP](https://github.com/Found-L/codex-switch/releases/latest)**
 
@@ -10,7 +10,7 @@ A Windows/macOS app and CLI for switching Codex between an existing account logi
 
 1. Install [Codex](https://learn.chatgpt.com/docs/quickstart). Sign in to Codex first if you want to use account credits.
 2. Install `CodexSwitch-VERSION-windows-x64-setup.exe`. Windows 10/11 x64; no Python or administrator access required. On macOS 14+, download the arm64 (Apple Silicon) or x64 (Intel) DMG, drag the app to Applications, then open that copy.
-3. Open **Codex Switch**, enter your own [OpenAI API key](https://platform.openai.com/api-keys), then select **Save and use API**. Choose your model and reasoning level in Codex. This tool preserves model configuration.
+3. Open **Codex Switch**, enter the base URL and its API key, then save. Official OpenAI works with the default catalog. For a gateway, continue to **Models**, discover models, enable coding models, save their capabilities, then apply with the selected model as default.
 4. Start a new Codex chat. Use the connection cards to switch back later. The UI includes an English/Chinese toggle.
 
 Keys are kept in Windows Credential Manager or the macOS login Keychain, scoped to your Windows user and Codex configuration directory. Enter your own key again on another computer. Account credits and API usage have separate billing.
@@ -26,6 +26,20 @@ A tray-opened panel dismisses on focus loss; a desktop-opened window stays visib
 ![Connection panel](docs/images/overview.png)
 
 Screenshots are offscreen renders of the actual QML interface with isolated fixture configuration.
+
+## Gateway models
+
+One New API URL and token can route multiple suppliers by model ID. Discovery calls `GET {base_url}/models` only. New entries start disabled; list presence is not proven inference compatibility. Generic templates default to 32K context, text only and no reasoning levels; set actual route capabilities before applying. Fast/Ultrafast/Ultra are disabled in generated catalogs. Reload Codex after catalog changes. Account model settings are restored when switching back.
+
+```text
+codex-switch setup --base-url https://your-gateway/v1
+codex-switch models sync
+codex-switch models configure your-model-id --context 32768
+codex-switch models apply --default your-model-id --use
+codex-switch models reset
+```
+
+Changing the endpoint requires re-entering its key. Key rotation invalidates the old model list/catalog. Discovery refuses redirects, validates HTTPS certificates and limits responses to 1 MiB. Plain HTTP is allowed only for loopback. No inference validation or automatic capability detection is performed. Full upstream Codex catalog import is not included. See the [detailed gateway guide (Chinese)](docs/gateways.md).
 
 ## Terminal
 
@@ -46,13 +60,13 @@ The portable ZIP needs no installation. Extract it and run `CodexSwitch.exe` or 
 
 ## Behavior and limits
 
-Switching updates the top-level provider in global `config.toml`. Setup adds a separately named `codex_switch_api` provider using official [command-backed authentication](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers). Existing account login, `auth.json`, models, speed settings, MCP and catalogs are preserved. Config backups are local to `CODEX_HOME/codex-switch/backups`. Never share backups of a preexisting configuration that may contain other secrets.
+Without a custom catalog, switching updates only the top-level provider in global `config.toml`. With a catalog, it also applies the API model and catalog and temporarily replaces reasoning, speed and context settings; account values restore when switching back or removing the API. Setup adds a separately named `codex_switch_api` provider using official [command-backed authentication](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers). Account login, `auth.json`, MCP and plugins are preserved. Config backups are local to `CODEX_HOME/codex-switch/backups`. Never share backups of a preexisting configuration that may contain other secrets.
 
 Existing official-OpenAI `openai_api` configurations can be reused without migrating credentials. Other providers are not forcibly replaced. A selected profile overriding `model_provider` blocks global switching.
 
 The UI shows global configuration, not the billing route of an already running chat. Existing chats, desktop prewarming/catalog caches, project configs and explicit CLI overrides can differ. Reload Codex if a full menu refresh is needed. The app does not terminate Codex.
 
-Setup is local and does not send requests to verify API access. Model availability, modes, quota and key validity depend on the OpenAI project. No model list is fabricated or filtered. Switching itself makes no network/model requests. Requires a Codex build supporting command-backed provider authentication; local baseline: CLI `0.166.0-alpha.6`. Release targets: Windows 10/11 x64 and macOS 14+ Apple Silicon/Intel. Linux is unsupported.
+Setup is local and does not send requests to verify API access. Availability, modes, quota and key validity depend on the selected gateway and upstream. Discovery reads the published model list; explicit user selections form the custom catalog. Switching itself makes no network/model requests. Requires a Codex build supporting command-backed provider authentication; catalog baseline: `rust-v0.162.1`, tested locally with CLI `0.166.0-alpha.6` model/list. Release targets: Windows 10/11 x64 and macOS 14+ Apple Silicon/Intel. Linux is unsupported.
 
 The per-user installer adds an optional desktop shortcut and user PATH entry. Uninstallation first detaches this tool's managed provider, switches a managed active API config back to `openai`, and removes its keys for registered homes. Account login and local backups remain; external legacy providers are left intact. For portable builds, run `codex-switch remove-api --yes` before deleting files. If permissions/config errors prevent safe cleanup, repair the affected home before uninstalling.
 

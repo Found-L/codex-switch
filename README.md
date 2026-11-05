@@ -2,7 +2,7 @@
 
 [English](README.en.md) · 简体中文
 
-Windows / macOS 上的 Codex 账号 / OpenAI API 切换工具。首次配置 Key，之后从窗口或终端切换。保留原有账号登录，无需手工编辑配置文件。
+Windows / macOS 上的 Codex 账号 / API 切换工具。支持 OpenAI 官方 API、DeepSeek 和 New API 等兼容 Responses 的接口；可同步模型名单并生成 Codex 菜单目录。保留原有账号登录，无需手工编辑配置文件。
 
 **[下载安装包 / 便携版](https://github.com/Found-L/codex-switch/releases/latest)** · [问题反馈](https://github.com/Found-L/codex-switch/issues)
 
@@ -12,7 +12,7 @@ Windows / macOS 上的 Codex 账号 / OpenAI API 切换工具。首次配置 Key
 
 1. 安装 [Codex](https://learn.chatgpt.com/docs/quickstart)。使用账号额度前，先在 Codex 中登录自己的账号。
 2. Windows 下载 `windows-x64-setup.exe`；Mac 下载对应芯片的 `macos-arm64.dmg`（M 系列）或 `macos-x64.dmg`（Intel），将 App 拖入 Applications 后打开。支持 Windows 10/11 x64、macOS 14+，无需 Python。
-3. 打开 **Codex Switch**，按首次引导创建并输入自己的 [OpenAI API Key](https://platform.openai.com/api-keys)，选择「保存并使用 API」。模型和推理档位在 Codex 中选择，本工具保留模型配置。
+3. 打开 **Codex Switch**，在「API 配置」输入地址与对应 Key。默认是 [OpenAI 官方 API](https://platform.openai.com/api-keys)，保存后即可切换；New API / DeepSeek 则继续在「模型」页同步、启用并应用模型目录。
 4. 在 Codex 中新建会话。以后点击连接卡片即可切回账号或 API。
 
 Key 仅保存在这台电脑、当前用户的 Windows 凭据管理器或 macOS 登录钥匙串中。换电脑后重新输入自己的 Key，不需要复制旧电脑的登录文件。账号额度和 API 分开计费。
@@ -32,6 +32,16 @@ Mac 的完整安装、菜单栏、终端命令、卸载与签名说明见 **[mac
 ![迷你窗口](docs/images/mini.png)
 
 截图由真实 QML 界面在隔离配置下离屏渲染。
+
+## New API / 多供应商模型
+
+只配置一个 New API 地址和 Key，就能同步网关公布的多供应商模型。逐个选择要用的编程模型，保存能力设置，再以当前模型为默认应用目录。模型列表和能力设置不会因填入 Key 自动出现在 Codex；首次应用或更新目录后需重载 Codex。
+
+同步只获取名单，不验证模型调用。新模型默认关闭，不猜测推理、图片和速度能力；通用目录默认 32K、仅文本、无推理档位，Fast / Ultrafast / Ultra 不开放。请按渠道真实能力调整。切回账号会恢复原账号模型设置。
+
+完整操作、能力限制与撤销说明见 **[网关与模型同步指南](docs/gateways.md)**。
+
+![网关模型配置](docs/images/models.png)
 
 ## 命令行
 
@@ -59,16 +69,16 @@ codex-switch --codex-home D:\my-codex setup --use
 
 ## 配置保留与兼容范围
 
-- 切换只修改全局 `config.toml` 的顶层 `model_provider`；已有模型、速度、推理设置、MCP、插件和 `auth.json` 保持不变。
+- 未启用自定义目录时，切换只修改全局 `config.toml` 的顶层 `model_provider`。启用后会同时应用 API 的模型目录与默认模型，暂存账号的模型、目录、速度、推理和上下文配置，切回账号或移除 API 时恢复；MCP、插件和 `auth.json` 不修改。
 - 首次配置新增独立的 `model_providers.codex_switch_api` 及命令取钥配置。Key 不写入 TOML、日志或备份；如果原配置本来包含其他明文秘密，原配置备份依然属于敏感文件，请留在本机。
 - 每次实际修改前，在 `CODEX_HOME/codex-switch/backups` 保存原配置。无变化的切换不重复改写。
 - 可沿用先前已配置、指向 OpenAI 官方 API 的 `openai_api` 提供商，不迁移其 Key，也不覆盖它。未知的其他提供商不会被强行替换。
-- 不修改模型目录，不伪造模型或模式的可用性。Key 是否有效、项目是否有额度、模型和模式是否支持，以 OpenAI 账户权限及实际请求结果为准。配置完成不代表已经发送请求验证。
+- 模型同步从指定接口获取名单，再按用户启用项生成本地目录，不把「已列出」当作「已验证」。Key、额度、模型和模式是否实际可用，以网关权限、真实渠道能力和请求结果为准。配置完成不代表已经发送推理请求验证。
 - 窗口显示的是**全局配置来源**。已有会话保留原来源；桌面预热会话、模型菜单缓存、项目级配置、CLI `--profile` / `-c` 等覆盖可能影响实际运行来源。必要时重载客户端以刷新菜单。本工具不会重启 Codex。
 - 根配置选中的 Profile 如果设置了 `model_provider`，工具会阻止误导性的全局切换，需先处理该覆盖。
 - 需要支持官方 [command-backed authentication](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers) 的 Codex 版本。本机兼容基线为 CLI `0.166.0-alpha.6`；不承诺旧版客户端支持。发行包覆盖 Windows 10/11 x64、macOS 14+ Apple Silicon 与 Intel；不支持 Linux，Windows ARM 未验证。
 
-切换和本地诊断不调用模型、不查询网络，不消耗模型 token。工具不附带 Codex 或任何 API Key。它是独立社区工具，与 OpenAI 无隶属关系。
+切换和本地诊断不调用模型、不查询网络；点击「同步模型」才请求指定 API 的模型名单，也不执行推理。工具不附带 Codex 或任何 API Key。它是独立社区工具，与 OpenAI 无隶属关系。
 
 ## 卸载
 

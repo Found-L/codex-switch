@@ -29,6 +29,21 @@ def main(argv=None):
     setup = commands.add_parser("setup", help="Securely enter an API key; never pass it as a command argument")
     setup.add_argument("--use", action="store_true", help="Switch to API after setup")
     setup.add_argument("--key-stdin", action="store_true", help="Read key from redirected stdin (not shell history)")
+    setup.add_argument("--base-url", help="HTTPS API base URL, including /v1 when required; default keeps the saved endpoint")
+    models = commands.add_parser("models", help="Discover and configure gateway models without inference requests")
+    model_commands = models.add_subparsers(dest="model_command", required=True)
+    model_commands.add_parser("sync")
+    model_commands.add_parser("list")
+    model_commands.add_parser("reset", help="Remove the managed catalog; keep the saved API connection")
+    configure = model_commands.add_parser("configure")
+    configure.add_argument("model")
+    configure.add_argument("--disable", action="store_true")
+    configure.add_argument("--context", type=int, default=32768)
+    configure.add_argument("--reasoning", default="", help="Comma-separated levels supported by this route; empty sends no reasoning effort")
+    configure.add_argument("--images", action="store_true")
+    apply_models = model_commands.add_parser("apply")
+    apply_models.add_argument("--default", dest="default_model")
+    apply_models.add_argument("--use", action="store_true")
     commands.add_parser("gui", help="Open the desktop application")
     install = commands.add_parser("install-cli", help="macOS: install a user-local terminal command and PATH integration")
     install.add_argument("--no-shell", action="store_true", help="Install the launcher without editing shell startup files")
@@ -84,6 +99,21 @@ def main(argv=None):
                 SwitchService(home).remove_api()
             return 0
         service = SwitchService(args.codex_home)
+        if args.command == "models":
+            if args.model_command == "sync":
+                service.sync_models()
+            elif args.model_command == "configure":
+                service.configure_model(args.model, not args.disable, args.context,
+                                        [e.strip() for e in args.reasoning.split(",") if e.strip()], args.images)
+            elif args.model_command == "apply":
+                service.apply_models(args.default_model)
+                if args.use:
+                    service.use("api")
+                print("Catalog saved. Reload Codex to refresh its model menu. Compatibility has not been tested.")
+            elif args.model_command == "reset":
+                service.reset_models()
+            print(json.dumps(service.status()["models"], ensure_ascii=False, indent=2))
+            return 0
         if args.command.startswith("vault-"):
             if sys.stdout.isatty():
                 raise SwitchError("Internal credential protocol requires redirected output.")
@@ -131,8 +161,8 @@ def main(argv=None):
             else:
                 if not sys.stdin.isatty():
                     raise SwitchError("Use --key-stdin for redirected input.")
-                key = getpass.getpass("OpenAI API key (hidden): ")
-            service.setup(key)
+                key = getpass.getpass("API key for the configured endpoint (hidden): ")
+            service.setup(key, args.base_url)
             print("API key saved in " + credential_store_name() + ".")
             if args.use:
                 service.use("api")
