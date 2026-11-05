@@ -83,7 +83,7 @@ def install_cli(helper, home=None, shell=None, configure_shell=True):
             or helper.parent.name != "Helpers" or helper.parent.parent.name != "Contents"):
         raise SwitchError("Install CLI from the packaged Codex Switch.app first.")
     ensure_stable_installation(helper)
-    home = Path(home or Path.home())
+    home = Path(home or os.environ.get("CODEX_SWITCH_TERMINAL_HOME") or Path.home())
     launcher = home / ".local" / "bin" / "codex-switch"
     previous = _read(launcher)
     if previous is not None and not previous.startswith(LAUNCHER_MARKER):
@@ -107,7 +107,7 @@ def install_cli(helper, home=None, shell=None, configure_shell=True):
 
 
 def uninstall_cli(home=None):
-    home = Path(home or Path.home())
+    home = Path(home or os.environ.get("CODEX_SWITCH_TERMINAL_HOME") or Path.home())
     launcher = home / ".local" / "bin" / "codex-switch"
     changes = []
     if os.path.lexists(launcher):

@@ -24,12 +24,15 @@ def main():
         config.mkdir(parents=True)
         (config / "auth.json").write_bytes(b"macos-account-sentinel")
         helper = app / "Contents/Helpers/codex-switch"
-        environment = dict(os.environ, HOME=str(home), SHELL="/bin/zsh", CODEX_HOME=str(config),
-                           CODEX_SWITCH_DATA_HOME=str(home / "state"))
+        # Keychain must retain the real OS user's HOME. Isolate shell integration
+        # separately, since faking HOME also changes macOS security preferences.
+        environment = dict(os.environ, SHELL="/bin/zsh", CODEX_HOME=str(config),
+                           CODEX_SWITCH_TERMINAL_HOME=str(home), CODEX_SWITCH_DATA_HOME=str(home / "state"))
 
         def call(*args, stdin=None):
+            child_environment = dict(environment, HOME=str(home)) if str(args[0]) == "/bin/zsh" else environment
             result = subprocess.run(list(map(str, args)), input=stdin, capture_output=True,
-                                    text=True, encoding="utf-8", env=environment, timeout=60)
+                                    text=True, encoding="utf-8", env=child_environment, timeout=60)
             if result.returncode:
                 raise RuntimeError("macOS installer smoke command failed: " + str(args[0]) + "; " + result.stderr[:600])
             return result.stdout

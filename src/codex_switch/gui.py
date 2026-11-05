@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QObject, Property, QEventLoop, QSettings, QTimer, QUrl, Signal, Slot, Qt
+from PySide6.QtCore import QObject, Property, QEvent, QEventLoop, QSettings, QTimer, QUrl, Signal, Slot, Qt
 from PySide6.QtGui import QAction, QCursor, QDesktopServices, QFont, QFontDatabase, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtQml import QQmlApplicationEngine
@@ -556,10 +556,11 @@ def self_test(report):
                       "page_transition_no_overlap": True,
                       "mini_window": True, "single_instance": True, "setup_entry_count": 1}
             model.shutdown()
-            model = None
             window.close()
             engine.deleteLater()
+            app.sendPostedEvents(engine, QEvent.DeferredDelete)
             app.processEvents()
+            model = None
     except Exception as error:
         result = {"ok": False, "error_type": type(error).__name__}
     finally:
