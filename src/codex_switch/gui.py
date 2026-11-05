@@ -1,4 +1,4 @@
-"""Persistent Qt Quick utility window and native Windows tray lifecycle."""
+"""Persistent Qt Quick utility window with Windows tray/macOS menu bar lifecycle."""
 from concurrent.futures import ThreadPoolExecutor
 import ctypes
 import hashlib
@@ -21,6 +21,7 @@ from . import __version__
 from .config import default_home
 from .errors import SwitchError
 from .service import SwitchService
+from .credentials import home_identity
 
 APP_ID = "FoundL.CodexSwitch"
 
@@ -41,7 +42,7 @@ def application(testing=False):
     app.setApplicationVersion(__version__)
     app.setOrganizationName("FoundL")
     app.setQuitOnLastWindowClosed(False)
-    app.setWindowIcon(QIcon(str(resources() / "assets" / "codex-switch.ico")))
+    app.setWindowIcon(app_icon())
     if testing and os.name == "nt":
         # The offscreen platform has no Windows system-font database. Register
         # local OS fonts for headless previews without redistributing them.
@@ -50,8 +51,14 @@ def application(testing=False):
             file = font_directory / filename
             if file.is_file():
                 QFontDatabase.addApplicationFont(str(file))
-    app.setFont(QFont("Segoe UI", 10))
+    if sys.platform != "darwin":
+        app.setFont(QFont("Segoe UI", 10))
     return app
+
+
+def app_icon():
+    extension = "icns" if sys.platform == "darwin" else "ico"
+    return QIcon(str(resources() / "assets" / ("codex-switch." + extension)))
 
 
 class Bridge(QObject):
@@ -81,7 +88,10 @@ class Bridge(QObject):
         self._compact = False if testing else self.settings.value("compact", False, type=bool)
         self._font_family = "Segoe UI Variable Text" if "Segoe UI Variable Text" in QFontDatabase.families() else "Segoe UI"
         families = QFontDatabase.families()
-        self._chinese_font = next((font for font in ("Microsoft YaHei UI", "Microsoft YaHei") if font in families), self._font_family)
+        if sys.platform == "darwin":
+            self._font_family = QApplication.font().family()
+        candidates = ("PingFang SC", "Heiti SC") if sys.platform == "darwin" else ("Microsoft YaHei UI", "Microsoft YaHei")
+        self._chinese_font = next((font for font in candidates if font in families), self._font_family)
         self._state = {"mode": "account", "api_ready": False, "key_saved": False, "profile_override": None}
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-config")
         self._completed.connect(self._apply_result)
@@ -125,6 +135,10 @@ class Bridge(QObject):
     @Property(bool, constant=True)
     def testingMode(self):
         return self.testing
+
+    @Property(bool, constant=True)
+    def isMac(self):
+        return sys.platform == "darwin"
 
     @Property(str, constant=True)
     def version(self):
@@ -194,6 +208,8 @@ class Bridge(QObject):
             if result["kind"] == "setup":
                 self.keySaved.emit()
                 self.openPage.emit("connections")
+        elif result["kind"] == "install-cli":
+            self._set_notice(self.tr_text("终端命令已安装，请重新打开终端。", "Terminal command installed. Open a new terminal."))
         if self._quit_when_idle:
             self.quitApp()
 
@@ -250,6 +266,12 @@ class Bridge(QObject):
         QApplication.clipboard().setText(text)
         self._set_notice(self.tr_text("命令已复制。", "Command copied."))
 
+    @Slot()
+    def installCli(self):
+        if sys.platform == "darwin":
+            from .terminal import install_cli
+            self._submit(lambda: install_cli(self.service.helper[0]), "install-cli")
+
     @Slot(str)
     def openLink(self, name):
         links = {"key": "https://platform.openai.com/api-keys", "codex": "https://learn.chatgpt.com/docs/quickstart",
@@ -264,11 +286,16 @@ class Bridge(QObject):
     def attach(self, window):
         self.window = window
         window.activeChanged.connect(self._focus_changed)
-        window.setIcon(QIcon(str(resources() / "assets" / "codex-switch.ico")))
+        window.setIcon(app_icon())
         if not self.testing and QSystemTrayIcon.isSystemTrayAvailable():
-            self.tray = QSystemTrayIcon(QApplication.windowIcon(), self)
+            icon = QApplication.windowIcon()
+            if sys.platform == "darwin":
+                icon = QIcon(str(resources() / "assets" / "tray-template.png"))
+                icon.setIsMask(True)
+            self.tray = QSystemTrayIcon(icon, self)
             self.menu = QMenu()
-            self.menu.setStyleSheet("QMenu {background:#ffffff;color:#242936;border:1px solid #e3e6ed;border-radius:8px;padding:6px;} QMenu::item {padding:7px 20px;border-radius:5px;} QMenu::item:selected {background:#eef0ff;color:#5146d8;} QMenu::separator {height:1px;background:#eceef3;margin:5px;}")
+            if sys.platform != "darwin":
+                self.menu.setStyleSheet("QMenu {background:#ffffff;color:#242936;border:1px solid #e3e6ed;border-radius:8px;padding:6px;} QMenu::item {padding:7px 20px;border-radius:5px;} QMenu::item:selected {background:#eef0ff;color:#5146d8;} QMenu::separator {height:1px;background:#eceef3;margin:5px;}")
             self.open_action = self.menu.addAction("Open", lambda: self.show_window(anchor=True))
             self.compact_action = self.menu.addAction("Mini", self._tray_compact)
             self.menu.addSeparator()
@@ -282,7 +309,9 @@ class Bridge(QObject):
             self.key_action = self.menu.addAction("API Key", self._tray_setup)
             self.quit_action = self.menu.addAction("Quit", self.quitApp)
             self._update_tray()
-            self.tray.setContextMenu(self.menu)
+            if sys.platform != "darwin":
+                # On macOS a permanently attached menu consumes left clicks.
+                self.tray.setContextMenu(self.menu)
             self.tray.activated.connect(self._tray_activated)
             self.tray.show()
 
@@ -302,7 +331,9 @@ class Bridge(QObject):
         self.quit_action.setText(self.tr_text("退出 Codex Switch", "Quit Codex Switch"))
 
     def _tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+        if reason == QSystemTrayIcon.ActivationReason.Context and sys.platform == "darwin":
+            self.menu.popup(QCursor.pos())
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_window(anchor=True)
         elif reason == QSystemTrayIcon.ActivationReason.Trigger:
             if self.window.isVisible():
@@ -333,7 +364,8 @@ class Bridge(QObject):
             screen = QApplication.screenAt(point) or QApplication.primaryScreen()
             available = screen.availableGeometry()
             self.window.setX(max(available.left(), min(point.x() - self.window.width() // 2, available.right() - self.window.width())))
-            self.window.setY(max(available.top(), available.bottom() - self.window.height() - 8))
+            desired_y = rectangle.bottom() + 8 if sys.platform == "darwin" else available.bottom() - self.window.height() - 8
+            self.window.setY(max(available.top(), min(desired_y, available.bottom() - self.window.height())))
         self.window.showNormal()
         self.window.raise_()
         self.window.requestActivate()
@@ -388,7 +420,7 @@ def load_scene(model):
 
 
 def instance_server(home, model):
-    identity = hashlib.sha256(str(home.resolve()).casefold().encode()).hexdigest()[:24]
+    identity = hashlib.sha256(home_identity(home).encode()).hexdigest()[:24]
     name = "FoundL-CodexSwitch-" + identity
     socket = QLocalSocket()
     socket.connectToServer(name)

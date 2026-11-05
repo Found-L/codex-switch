@@ -1,7 +1,7 @@
 """Render the original linked-capsule brand at native Windows icon sizes."""
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 DESTINATION = Path(__file__).resolve().parents[1] / "assets"
 SCALE = 4
@@ -46,6 +46,10 @@ def main():
     icon.resize((88, 88), Image.Resampling.LANCZOS).save(DESTINATION / "logo-88.png")
     sizes = [(n, n) for n in (16, 20, 24, 32, 40, 48, 64, 128, 256)]
     large.save(DESTINATION / "codex-switch.ico", sizes=sizes)
+    icon.save(DESTINATION / "codex-switch.icns", format="ICNS")
+    template = Image.new("RGBA", icon.size, (0, 0, 0, 0))
+    template.putalpha(ImageChops.lighter(ImageChops.subtract(first, shadow), second))
+    template.resize((64, 64), Image.Resampling.LANCZOS).save(DESTINATION / "tray-template.png")
 
 
 if __name__ == "__main__":

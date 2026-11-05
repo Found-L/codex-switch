@@ -1,15 +1,34 @@
-"""Per-Windows-user credentials. No plaintext file or environment fallback."""
+"""OS credential stores. No plaintext file or environment fallback."""
 import ctypes
 from ctypes import wintypes
 import hashlib
 import os
+import sys
 
 from .errors import SwitchError
 
 
+def home_identity(home):
+    identity = str(home.resolve())
+    return identity.casefold() if os.name == "nt" else identity
+
+
 def target_for(home):
-    identity = str(home.resolve()).casefold().encode("utf-8")
+    identity = home_identity(home).encode("utf-8")
     return "CodexSwitch/OpenAI/" + hashlib.sha256(identity).hexdigest()[:32]
+
+
+def credential_store_name():
+    return "macOS Keychain" if sys.platform == "darwin" else "Windows Credential Manager"
+
+
+def default_credentials(home, helper=None):
+    if sys.platform == "darwin":
+        from .macos_credentials import MacOSCredentials
+        return MacOSCredentials(home, trusted_paths=[helper] if helper else [])
+    if os.name == "nt":
+        return WindowsCredentials(home)
+    raise SwitchError("Codex Switch supports Windows and macOS.")
 
 
 class Credential(ctypes.Structure):

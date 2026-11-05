@@ -1,5 +1,6 @@
 from copy import deepcopy
 import io
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -8,7 +9,7 @@ from unittest.mock import patch as mock_patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from codex_switch.config import API_URL, PROVIDER, parse
-from codex_switch.credentials import WindowsCredentials, target_for
+from codex_switch.credentials import default_credentials, target_for
 from codex_switch.errors import SwitchError
 from codex_switch.service import SwitchService, helper_command
 
@@ -52,6 +53,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(provider["wire_api"], "responses")
         self.assertNotIn("requires_openai_auth", provider)
 
+    @unittest.skipUnless(os.name == "nt", "Windows source interpreter path")
     def test_source_gui_uses_console_python_for_credential_stdout(self):
         with mock_patch("sys.executable", r"C:\Python\pythonw.exe"):
             self.assertEqual(Path(helper_command()[0]).name, "python.exe")
@@ -187,8 +189,9 @@ class ServiceTests(unittest.TestCase):
                 self.service.use("api")
         self.write_config(original)
 
-    def test_windows_store_roundtrip_isolated_to_test_home(self):
-        store = WindowsCredentials(self.home)
+    @unittest.skipUnless(os.name == "nt" or sys.platform == "darwin", "Native credential store")
+    def test_native_store_roundtrip_isolated_to_test_home(self):
+        store = default_credentials(self.home, sys.executable)
         self.addCleanup(store.delete)
         self.assertIsNone(store.read())
         store.write("credential-store-fixture")

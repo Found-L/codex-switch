@@ -9,7 +9,8 @@ import sys
 
 from . import __version__
 from .errors import SwitchError
-from .service import SwitchService, registered_homes
+from .credentials import credential_store_name
+from .service import SwitchService, registered_homes, helper_command, registry_path
 
 
 def main(argv=None):
@@ -29,19 +30,44 @@ def main(argv=None):
     setup.add_argument("--use", action="store_true", help="Switch to API after setup")
     setup.add_argument("--key-stdin", action="store_true", help="Read key from redirected stdin (not shell history)")
     commands.add_parser("gui", help="Open the desktop application")
+    install = commands.add_parser("install-cli", help="macOS: install a user-local terminal command and PATH integration")
+    install.add_argument("--no-shell", action="store_true", help="Install the launcher without editing shell startup files")
+    commands.add_parser("uninstall-cli", help="macOS: remove managed terminal integration")
+    uninstall = commands.add_parser("uninstall", help="macOS: detach managed providers/keys and terminal integration before deleting the app")
+    uninstall.add_argument("--yes", action="store_true")
     commands.add_parser("credential", help=argparse.SUPPRESS)
     commands.add_parser("uninstall-cleanup", help=argparse.SUPPRESS)
     remove = commands.add_parser("remove-api", help="Remove this tool's provider/key; preserve Codex account login")
     remove.add_argument("--yes", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.command in ("install-cli", "uninstall-cli", "uninstall"):
+            if sys.platform != "darwin":
+                raise SwitchError("These integration commands are for macOS. Use Windows Settings for Windows uninstallation.")
+            from .terminal import install_cli, uninstall_cli
+            if args.command == "install-cli":
+                install_cli(helper_command()[0], configure_shell=not args.no_shell)
+                print("Terminal command installed in ~/.local/bin. Open a new terminal.")
+                return 0
+            if args.command == "uninstall":
+                if not args.yes and (not sys.stdin.isatty() or input("Detach managed providers/keys and terminal integration? [y/N] ").lower() != "y"):
+                    return 1
+                for home in set([SwitchService(args.codex_home).home, *registered_homes()]):
+                    SwitchService(home).remove_api()
+                registry_path().unlink(missing_ok=True)
+            uninstall_cli()
+            print("Managed integration removed. Account login and configuration backups are preserved.")
+            return 0
         if args.command == "gui":
             if getattr(sys, "frozen", False):
-                executable = Path(sys.executable).with_name("CodexSwitch.exe")
+                if sys.platform == "darwin":
+                    executable = Path(sys.executable).resolve().parent.parent / "MacOS" / "Codex Switch"
+                else:
+                    executable = Path(sys.executable).with_name("CodexSwitch.exe")
                 command = [str(executable)]
                 if args.codex_home:
                     command += ["--codex-home", str(args.codex_home)]
-                subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.Popen(command, **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}))
             else:
                 executable = Path(sys.executable)
                 if executable.name.lower() == "python.exe":
@@ -49,7 +75,7 @@ def main(argv=None):
                 command = [str(executable), str(Path(__file__).resolve().parents[2] / "app_gui.py")]
                 if args.codex_home:
                     command += ["--codex-home", str(args.codex_home)]
-                subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.Popen(command, **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}))
             return 0
         if args.command == "uninstall-cleanup":
             for home in set([SwitchService(args.codex_home).home, *registered_homes()]):
@@ -87,7 +113,7 @@ def main(argv=None):
                     raise SwitchError("Use --key-stdin for redirected input.")
                 key = getpass.getpass("OpenAI API key (hidden): ")
             service.setup(key)
-            print("API key saved in Windows Credential Manager.")
+            print("API key saved in " + credential_store_name() + ".")
             if args.use:
                 service.use("api")
                 print("Switched to API. Start a new Codex chat; existing chats keep their provider.")

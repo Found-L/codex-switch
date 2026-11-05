@@ -8,7 +8,7 @@ import tempfile
 import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from codex_switch.credentials import WindowsCredentials
+from codex_switch.credentials import default_credentials
 
 executable = Path(sys.argv[1]).resolve()
 with tempfile.TemporaryDirectory(prefix="codex-switch-smoke-") as temporary:
@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-smoke-") as temporary:
     auth = home / "auth.json"
     auth.write_bytes(b"account-sentinel")
     (home / "config.toml").write_bytes(b'model = "existing-model"\nservice_tier = "priority"\n')
-    environment = dict(os.environ, LOCALAPPDATA=str(root / "local"), PYTHONIOENCODING="utf-8")
+    environment = dict(os.environ, LOCALAPPDATA=str(root / "local"), CODEX_SWITCH_DATA_HOME=str(root / "local"), PYTHONIOENCODING="utf-8")
 
     def call(*arguments, stdin=None):
         result = subprocess.run([str(executable), "--codex-home", str(home), *arguments],
@@ -54,4 +54,8 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-smoke-") as temporary:
         print("Packaged CLI smoke passed: setup, credential helper, account/API roundtrip, safe cleanup; 0 model requests.")
     finally:
         # Clean the isolated vault entry even if a broken binary cannot run cleanup.
-        WindowsCredentials(home).delete()
+        if sys.platform == "darwin":
+            subprocess.run([str(executable), "--codex-home", str(home), "remove-api", "--yes"],
+                           capture_output=True, env=environment, timeout=30)
+        else:
+            default_credentials(home, str(executable)).delete()

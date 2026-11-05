@@ -5,7 +5,7 @@ import sys
 import tomllib
 
 from .config import API_URL, LEGACY, PROVIDER, ConfigFile, default_home, lock, parse, patch
-from .credentials import WindowsCredentials
+from .credentials import default_credentials
 from .errors import SwitchError
 
 MANAGED_NAME = "OpenAI API (Codex Switch)"
@@ -13,6 +13,11 @@ MANAGED_NAME = "OpenAI API (Codex Switch)"
 
 def helper_command():
     if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            executable = Path(sys.executable).resolve()
+            if executable.parent.name == "MacOS" and executable.parent.parent.name == "Contents":
+                executable = executable.parent.parent / "Helpers" / "codex-switch"
+            return str(executable), []
         return str(Path(sys.executable).with_name("codex-switch.exe")), []
     executable = Path(sys.executable)
     if executable.name.lower() == "pythonw.exe":
@@ -21,6 +26,10 @@ def helper_command():
 
 
 def registry_path():
+    if os.environ.get("CODEX_SWITCH_DATA_HOME"):
+        return Path(os.environ["CODEX_SWITCH_DATA_HOME"]) / "homes.json"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Codex Switch" / "homes.json"
     return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "CodexSwitch" / "homes.json"
 
 
@@ -45,8 +54,8 @@ class SwitchService:
     def __init__(self, home=None, credentials=None, helper=None, track=True):
         self.config = ConfigFile(home or default_home())
         self.home = self.config.home
-        self.credentials = credentials if credentials is not None else WindowsCredentials(self.home)
         self.helper = helper or helper_command()
+        self.credentials = credentials if credentials is not None else default_credentials(self.home, self.helper[0])
         self.track = track
 
     @staticmethod
@@ -109,6 +118,10 @@ class SwitchService:
             return {"changed": True, "backup": backup, **self.status()}
 
     def setup(self, key):
+        if sys.platform == "darwin" and getattr(sys, "frozen", False):
+            helper = Path(self.helper[0]).resolve()
+            if str(helper).startswith("/Volumes/") or "/AppTranslocation/" in str(helper):
+                raise SwitchError("Copy Codex Switch.app to Applications and open that copy before saving a key.")
         if key is not None:
             key = key.strip()
             if not key or any(c.isspace() or ord(c) < 32 for c in key) or len(key.encode("utf-8")) > 2560:

@@ -50,7 +50,10 @@ def patch(raw, change):
 
 @contextmanager
 def lock(home):
-    import msvcrt
+    if os.name == "nt":
+        import msvcrt
+    else:
+        import fcntl
     state = home / "codex-switch"
     state.mkdir(parents=True, exist_ok=True)
     with (state / "config.lock").open("a+b") as handle:
@@ -62,7 +65,10 @@ def lock(home):
         while True:
             try:
                 handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                if os.name == "nt":
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except OSError:
                 if time.monotonic() >= deadline:
@@ -72,7 +78,10 @@ def lock(home):
             yield
         finally:
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 class ConfigFile:
@@ -92,7 +101,8 @@ class ConfigFile:
         backups = self.home / "codex-switch" / "backups"
         backups.mkdir(parents=True, exist_ok=True)
         backup = backups / (str(time.time_ns()) + ".toml")
-        backup.write_bytes(original)
+        with os.fdopen(os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as handle:
+            handle.write(original)
         fd, name = tempfile.mkstemp(prefix=".codex-switch-", dir=self.home)
         try:
             with os.fdopen(fd, "wb") as handle:

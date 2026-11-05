@@ -20,9 +20,9 @@ Window {
     readonly property color muted: "#858998"
     readonly property bool api: bridge.state.mode === "api"
     function t(zh, en) { return bridge.language === "zh" ? zh : en }
-    Shortcut { sequence: "Ctrl+M"; onActivated: bridge.hideToTray() }
-    Shortcut { sequence: "Ctrl+Shift+M"; onActivated: bridge.toggleCompact() }
-    Shortcut { sequence: "Ctrl+Q"; onActivated: bridge.quitApp() }
+    Shortcut { sequence: bridge.isMac ? "Meta+M" : "Ctrl+M"; onActivated: bridge.hideToTray() }
+    Shortcut { sequence: bridge.isMac ? "Meta+Shift+M" : "Ctrl+Shift+M"; onActivated: bridge.toggleCompact() }
+    Shortcut { sequence: bridge.isMac ? "Meta+Q" : "Ctrl+Q"; onActivated: bridge.quitApp() }
 
     onClosing: function(event) {
         if (!bridge.testingMode) { event.accepted = false; bridge.hideToTray() }
@@ -204,7 +204,7 @@ Window {
         Row {
             anchors.right: parent.right; anchors.rightMargin: 19; y: 21; spacing: 3
             GlyphButton { kind: "mini"; tip: bridge.compact ? root.t("展开面板", "Full panel") : root.t("迷你窗口", "Mini window"); onClicked: bridge.toggleCompact() }
-            GlyphButton { kind: "close"; tip: root.t("收进托盘", "Hide to tray"); onClicked: bridge.hideToTray() }
+            GlyphButton { kind: "close"; tip: bridge.isMac ? root.t("收进菜单栏", "Hide to menu bar") : root.t("收进托盘", "Hide to tray"); onClicked: bridge.hideToTray() }
         }
 
         Rectangle {
@@ -276,7 +276,7 @@ Window {
                     color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10
                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.showKey = !root.showKey }
                 }
-                Text { y: 174; width: parent.width; text: root.t("Key 保存在当前 Windows 用户的凭据管理器中。", "Stored in Windows Credential Manager for your user."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                Text { y: 174; width: parent.width; text: bridge.isMac ? root.t("Key 保存在当前用户的 macOS 钥匙串中。", "Stored in your macOS login Keychain.") : root.t("Key 保存在当前 Windows 用户的凭据管理器中。", "Stored in Windows Credential Manager for your user."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
                 SoftButton { y: 232; width: parent.width; primary: true; text: bridge.busy ? root.t("正在保存…", "Saving…") : root.t("保存并使用 API", "Save and use API"); enabled: !bridge.busy; onClicked: bridge.saveKey(keyField.text) }
                 Text { y: 296; text: root.t("创建 OpenAI API Key ↗", "Create an OpenAI API key ↗"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("key") } }
                 Text { y: 332; text: root.t("还没有 Codex？查看安装说明 ↗", "Need Codex? Open the installation guide ↗"); color: "#9a9fac"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("codex") } }
@@ -288,19 +288,20 @@ Window {
                 anchors.fill: parent
                 visible: root.displayedPage === "terminal"
                 Text { text: root.t("终端里，也很顺手", "Just as easy in your terminal"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
-                Text { y: 36; width: parent.width; text: root.t("安装后重新打开终端，即可使用。", "Open a new terminal after installation."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                Text { y: 36; width: parent.width; text: bridge.isMac ? root.t("点击下方安装命令，再打开新终端。", "Install the command below, then open a new terminal.") : root.t("安装后重新打开终端，即可使用。", "Open a new terminal after installation."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
                 Column {
-                    y: 82; width: parent.width; spacing: 13
+                    y: 82; width: parent.width; spacing: bridge.isMac ? 9 : 13
                     Repeater {
                         model: ["codex-switch setup --use", "codex-switch status", "codex-switch use api", "codex-switch use account"]
                         Rectangle {
                             required property string modelData
-                            width: parent.width; height: 53; radius: 12; color: "white"; border.color: "#e2e5ef"
+                            width: parent.width; height: bridge.isMac ? 46 : 53; radius: 12; color: "white"; border.color: "#e2e5ef"
                             Text { x: 13; anchors.verticalCenter: parent.verticalCenter; text: modelData; color: "#62677d"; font.family: "Consolas"; font.pixelSize: 11 }
                             Text { anchors.right: parent.right; anchors.rightMargin: 13; anchors.verticalCenter: parent.verticalCenter; text: root.t("复制", "Copy"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.copyText(modelData) } }
                         }
                     }
                 }
+                SoftButton { visible: bridge.isMac; y: 312; width: parent.width; height: 40; text: root.t("安装 / 修复终端命令", "Install / repair terminal command"); enabled: !bridge.busy; onClicked: bridge.installCli() }
             }
         }
 
