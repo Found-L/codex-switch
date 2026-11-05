@@ -247,10 +247,10 @@ class Bridge(QObject):
             self._set_notice(self.tr_text("模型设置已保存，请应用目录。", "Model settings saved. Apply the catalog next."))
             self.capabilitiesSaved.emit()
         elif result["kind"] == "apply-models":
-            self._set_notice(self.tr_text("目录已应用。请重载 Codex 刷新菜单；未进行模型调用验证。", "Catalog applied. Reload Codex to refresh the menu. Inference is untested."))
+            self._set_notice(self.tr_text("目录已写入配置。请完全退出并重启 Codex；尚未验证桌面加载或模型调用。", "Catalog written to config. Fully quit and restart Codex. Desktop loading and inference are unverified."))
             self.catalogApplied.emit()
         elif result["kind"] == "reset-models":
-            self._set_notice(self.tr_text("已撤销自定义模型目录，API 配置仍保留。请重载 Codex。", "Custom catalog reset. API connection retained. Reload Codex."))
+            self._set_notice(self.tr_text("已撤销自定义模型目录，API 配置仍保留。请完全退出并重启 Codex。", "Custom catalog reset. API connection retained. Fully quit and restart Codex."))
         elif result["kind"] == "install-cli":
             self._set_notice(self.tr_text("终端命令已安装，请重新打开终端。", "Terminal command installed. Open a new terminal."))
         if self._quit_when_idle:

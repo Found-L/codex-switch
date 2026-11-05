@@ -8,6 +8,8 @@ import json
 import re
 import shutil
 import subprocess
+import os
+import tempfile
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import URLError, HTTPError
@@ -76,13 +78,45 @@ def official_metadata(base_url, key):
         return {}, "unavailable"
 
 
-def enrich_models(models, entries):
+def bundled_metadata(base_url):
+    """Read this client's static defaults in an empty home; never reuse account caches.
+
+    Only official routes may inherit OpenAI's instructions. A bundled entry is
+    a versioned template, not proof of access for the current API key.
+    """
+    if base_url != API_URL:
+        return {}
+    executable = shutil.which("codex")
+    if not executable:
+        return {}
+    try:
+        with tempfile.TemporaryDirectory(prefix="codex-switch-bundled-") as home:
+            env = dict(os.environ, CODEX_HOME=home)
+            for name in ("OPENAI_API_KEY", "CODEX_API_KEY"):
+                env.pop(name, None)
+            result = subprocess.run([executable, "debug", "models", "--bundled"],
+                                    capture_output=True, timeout=8, env=env, cwd=home,
+                                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
+        if result.returncode or len(result.stdout) > MAX_BYTES:
+            return {}
+        data = json.loads(result.stdout)
+        return {m["slug"]: m for m in data.get("models", [])
+                if isinstance(m, dict) and isinstance(m.get("slug"), str)
+                and m.get("visibility") == "list" and m.get("supported_in_api")
+                and isinstance(m.get("supported_reasoning_levels"), list)}
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
+        return {}
+
+
+def enrich_models(models, entries, bundled=None):
+    bundled = bundled or {}
     for model in models:
-        entry = entries.get(model["id"])
+        entry = entries.get(model["id"]) or bundled.get(model["id"])
         model["category"] = classification(model["id"])
         # Exact official ID only. Aliases and gateway entries keep basic metadata.
         if entry and model["category"] != "excluded":
             model["official_entry"] = deepcopy(entry)
+            model["metadata_source"] = "official" if model["id"] in entries else "bundled"
             if not model.get("manual_capabilities"):
                 model["context_window"] = entry.get("context_window") or 32768
                 model["reasoning"] = [r["effort"] for r in entry["supported_reasoning_levels"]]
@@ -92,7 +126,8 @@ def enrich_models(models, entries):
             if model.get("official_entry") and not model.get("manual_capabilities"):
                 model.update(context_window=32768, reasoning=[], images=False)
             model.pop("official_entry", None)
-            if entries and model["category"] != "excluded":
+            model.pop("metadata_source", None)
+            if (entries or bundled) and model["category"] != "excluded":
                 model["category"] = "other"
         if model["category"] == "excluded":
             model["enabled"] = False

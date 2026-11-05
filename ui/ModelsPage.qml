@@ -14,7 +14,7 @@ Item {
     property var detail: entries.find(function(m) { return m.id === detailId }) || null
     function t(zh, en) { return host.t(zh, en) }
     function sourceLabel(m) {
-        return m.category === "excluded" ? t("非编程模型", "Not for coding") : m.capability_source === "official" ? t("官方参数 · 未实测", "Official metadata · untested") : m.capability_source === "manual" ? t("手动参数 · 未实测", "Manual metadata · untested") : t("基础模板 · 未验证", "Basic template · unverified")
+        return m.category === "excluded" ? t("非编程模型", "Not for coding") : m.capability_source === "official" ? t("远端参数 · 未实测", "Remote metadata · untested") : m.capability_source === "bundled" ? t("Codex 内置参数 · API 未验证", "Codex defaults · API untested") : m.capability_source === "manual" ? t("手动参数 · 未实测", "Manual metadata · untested") : t("基础模板 · 未验证", "Basic template · unverified")
     }
     function reconcile(force) {
         const id = bridge.state.api_provider + "|" + bridge.state.base_url
@@ -56,25 +56,33 @@ Item {
     }
 
     Text { text: t("选择编程模型", "Choose coding models"); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
-    Text { y: 27; text: bridge.state.metadata_status === "available" ? t("官方参数已匹配；实际调用尚未验证。", "Official metadata matched; inference is untested.") : (bridge.state.metadata_status || "").indexOf("unavailable") === 0 ? t("未获取官方参数，基础模板需确认能力。", "Official metadata unavailable. Basic templates need review.") : t("目录候选，尚未验证调用；勾选后统一应用。", "Candidates, not proven access. Select, then apply."); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+    Text {
+        objectName: "catalogLoadNotice"
+        y: 26; width: parent.width; height: 29; wrapMode: Text.WordWrap
+        text: bridge.state.catalog_model_mismatch
+            ? t("配置模型 ", "Configured model ") + bridge.state.model + t(" 不在已保存目录中。重新保存，再完全退出并重启 Codex。", " is outside the saved catalog. Save again, then fully quit and restart Codex.")
+            : bridge.state.catalog_configured ? t("目录已写入配置；完全退出并重启 Codex 后加载。", "Catalog saved to config. Fully quit and restart Codex to load it.")
+            : t("勾选用于替换模型目录，不代表当前桌面菜单或调用权限。", "Selection replaces the catalog; it does not mirror the live menu or prove API access.")
+        color: bridge.state.catalog_model_mismatch ? "#a26016" : host.muted; font.family: bridge.fontFamily; font.pixelSize: 10
+    }
     TextField {
         id: search; objectName: "modelSearch"
-        y: 50; width: parent.width - 92; height: 34; leftPadding: 11
+        y: 59; width: parent.width - 92; height: 34; leftPadding: 11
         placeholderText: t("搜索模型名称…", "Search model names…"); selectByMouse: true
         font.family: bridge.fontFamily; font.pixelSize: 11; color: host.ink
         background: Rectangle { radius: 10; color: "white"; border.color: search.activeFocus ? host.accent : "#dfe3ee" }
     }
     Button {
-        x: parent.width - 82; y: 50; width: 82; height: 34
+        x: parent.width - 82; y: 59; width: 82; height: 34
         text: bridge.busy ? t("处理中", "Working") : !bridge.state.api_ready ? t("配置 API", "API setup") : t("同步", "Refresh")
         enabled: !bridge.busy; onClicked: bridge.syncModels()
         contentItem: Text { text: parent.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold }
         background: Rectangle { radius: 10; color: parent.down ? "#e2dff9" : "#eceafa" }
     }
     Row {
-        y: 94; spacing: 6
+        y: 103; spacing: 6
         Repeater {
-            model: [{id:"candidate",zh:"编程候选",en:"Candidates"},{id:"selected",zh:"已选择",en:"Selected"},{id:"all",zh:"全部",en:"All"}]
+            model: [{id:"candidate",zh:"编程候选",en:"Candidates"},{id:"selected",zh:"目录所选",en:"Selected"},{id:"all",zh:"全部",en:"All"}]
             delegate: Rectangle {
                 required property var modelData
                 width: 76; height: 25; radius: 8; color: picker.scope === modelData.id ? "#e8e5fb" : "transparent"
@@ -83,9 +91,9 @@ Item {
             }
         }
     }
-    Text { y: 100; anchors.right: parent.right; text: modelList.count + t(" / ", " / ") + entries.length; color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
+    Text { y: 109; anchors.right: parent.right; text: modelList.count + t(" / ", " / ") + entries.length; color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
     Rectangle {
-        x: 0; y: 129; width: parent.width; height: parent.height - y - 62
+        x: 0; y: 138; width: parent.width; height: parent.height - y - 62
         color: "white"; radius: 13; border.color: "#e2e5ef"; clip: true
         ListView {
             id: modelList; objectName: "gatewayModelList"

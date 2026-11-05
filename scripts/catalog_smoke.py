@@ -10,23 +10,33 @@ import tempfile
 import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from codex_switch.catalog import model_info, official_metadata, classification
+from codex_switch.catalog import model_info, official_metadata, bundled_metadata, classification
 from codex_switch.settings import atomic_json
 
 executable = shutil.which("codex")
 if not executable:
     raise SystemExit("Codex executable required for catalog acceptance.")
 catalog_models = [model_info("gateway-test-deepseek", 65536, ["low", "high"]), model_info("gateway-test-other", 32768)]
-native = "--official-metadata" in sys.argv
+native = "--official-metadata" in sys.argv or "--bundled-metadata" in sys.argv
 if native:
     from codex_switch.service import SwitchService
     service = SwitchService(track=False)
     state = service.status()
-    entries, status = official_metadata(state["base_url"], service._discovery_credential(state))
+    if "--bundled-metadata" in sys.argv:
+        entries = bundled_metadata(state["base_url"])
+        status = "available" if entries else "unavailable"
+    else:
+        entries, status = official_metadata(state["base_url"], service._discovery_credential(state))
     listed = {model["id"] for model in state["models"]}
     catalog_models = [entry for name, entry in entries.items() if name in listed and classification(name) != "excluded"]
     if status != "available" or not catalog_models:
         raise SystemExit("Official metadata unavailable for native catalog acceptance.")
+if "--configured-catalog" in sys.argv:
+    from codex_switch.service import SwitchService
+    from codex_switch.config import parse
+    config = parse(SwitchService(track=False).config.read())
+    catalog_models = json.loads(Path(config["model_catalog_json"]).read_text("utf-8"))["models"]
+    native = True
 with tempfile.TemporaryDirectory(prefix="switch-catalog-") as temporary:
     home = Path(temporary)
     catalog = home / "catalog.json"
@@ -36,7 +46,8 @@ with tempfile.TemporaryDirectory(prefix="switch-catalog-") as temporary:
     for name in ("OPENAI_API_KEY", "CODEX_API_KEY"):
         env.pop(name, None)
     process = subprocess.Popen([executable, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=env, cwd=home,
+                               stderr=subprocess.DEVNULL, text=True, encoding="utf-8", env=env,
+                               cwd=Path(__file__).resolve().parent,
                                **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
     messages = queue.Queue()
     def reader():

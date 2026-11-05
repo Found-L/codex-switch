@@ -1,3 +1,12 @@
+## Codex Switch v0.5.1
+
+- 修复远端 Codex 元数据缺项时，当前客户端自带模型从候选列表消失的问题。仅对官方 OpenAI 地址，将当前 Key 名单与已安装 Codex 的可见内置条目精确匹配；保留原生指令和参数，并区分远端、内置与基础模板来源。
+- 将「已选择」改为「目录所选」，明确它是启动时替换的目录，不是当前桌面菜单。写入成功不再显示为已生效，明确要求完全退出并重启 Codex。
+- 检测当前配置模型不在保存目录内的情况，持续显示不一致提示；不会自动选择模型、重启 Codex 或修改账号登录。
+- 50 项回归测试通过；隔离 app-server 读取当前 9 个可见内置条目及用户保存的单模型目录成功，无模型推理请求。桌面重启后的菜单仍需用户验收，工具不会把隔离验证冒充运行中桌面验证。
+
+Fix missing built-in model candidates and misleading catalog activation claims. Fully quit and restart Codex after saving. API access and inference remain untested.
+
 ## Codex Switch v0.5.0
 
 - 模型页改为有界的搜索、多选列表，支持「编程候选 / 已选择 / 全部」、默认模型和一次应用，移除原来的长下拉框。

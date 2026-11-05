@@ -8,7 +8,7 @@ import subprocess
 from .config import API_URL, LEGACY, PROVIDER, ConfigFile, default_home, lock, parse, patch
 from .credentials import default_credentials, HelperCredentials
 from .errors import SwitchError
-from .catalog import endpoint, discover, merge_discovery, make_catalog, model_info, classification, official_metadata, enrich_models
+from .catalog import endpoint, discover, merge_discovery, make_catalog, model_info, classification, official_metadata, bundled_metadata, enrich_models
 from .settings import MODEL_KEYS, read_state, write_state, atomic_json
 import hashlib
 from copy import deepcopy
@@ -97,6 +97,15 @@ class SwitchService:
         mode = "account" if current == "openai" else "api" if current in (PROVIDER, LEGACY) else "other"
         profile = config.get("profile")
         override = config.get("profiles", {}).get(profile, {}).get("model_provider") if profile else None
+        catalog_configured = config.get("model_catalog_json") == connection.get("catalog") and bool(connection.get("catalog"))
+        catalog_models = []
+        if catalog_configured:
+            try:
+                catalog_path = Path(connection["catalog"])
+                if catalog_path.stat().st_size <= 1024 * 1024:
+                    catalog_models = [m["slug"] for m in json.loads(catalog_path.read_text("utf-8"))["models"]]
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
         return {
             "mode": mode, "provider": current, "api_provider": api_id,
             "api_ready": bool(ready), "managed_key": self.managed(own), "key_saved": key_saved,
@@ -107,12 +116,15 @@ class SwitchService:
             "api_label": "OpenAI API" if connection.get("base_url", API_URL) == API_URL else "Custom API",
             "models": [{**{k: v for k, v in m.items() if k != "official_entry"},
                         "category": m.get("category", classification(m["id"])),
-                        "capability_source": "manual" if m.get("manual_capabilities") else "official" if m.get("official_entry") else "basic"}
+                        "capability_source": "manual" if m.get("manual_capabilities") else m.get("metadata_source", "official") if m.get("official_entry") else "basic"}
                        for m in connection.get("models", [])],
             "metadata_status": connection.get("metadata_status", "not_requested"),
             "catalog_enabled": bool(connection.get("catalog")),
             "catalog_dirty": bool(connection.get("catalog_dirty")),
-            "catalog_active": config.get("model_catalog_json") == connection.get("catalog") and bool(connection.get("catalog")),
+            # Configuration match only; this does not inspect the running desktop.
+            "catalog_active": catalog_configured,
+            "catalog_configured": catalog_configured,
+            "catalog_model_mismatch": catalog_configured and config.get("model") not in catalog_models,
         }
 
     def _commit(self, original, updated, connection):
@@ -289,10 +301,11 @@ class SwitchService:
             key = self._discovery_credential(state)
         fresh = discover(state["base_url"], key)
         metadata, metadata_status = official_metadata(state["base_url"], key)
+        bundled = bundled_metadata(state["base_url"])
         with lock(self.home):
             if self.config.read() != original or self._discovery_credential(self.status()) != key or read_state(self.home) != connection:
                 raise SwitchError("Connection changed during synchronization. Retry.")
-            connection["models"] = enrich_models(merge_discovery(fresh, connection.get("models", [])), metadata)
+            connection["models"] = enrich_models(merge_discovery(fresh, connection.get("models", [])), metadata, bundled)
             connection["metadata_status"] = metadata_status
             connection["catalog_dirty"] = True
             connection["models_provider"] = state["api_provider"]
@@ -426,7 +439,9 @@ class SwitchService:
                 raise SwitchError("Model is not in the latest synchronized list.")
             match.pop("manual_capabilities", None)
             match.update(context_window=32768, reasoning=[], images=False)
-            enrich_models([match], {model: match["official_entry"]} if match.get("official_entry") else {})
+            defaults = {model: match["official_entry"]} if match.get("official_entry") else {}
+            enrich_models([match], {} if match.get("metadata_source") == "bundled" else defaults,
+                          defaults if match.get("metadata_source") == "bundled" else {})
             connection["catalog_dirty"] = True
             write_state(self.home, connection)
         return self.status()

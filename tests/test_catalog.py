@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import test_service
-from codex_switch.catalog import discover, endpoint, classification, enrich_models, make_catalog, model_info, official_metadata, merge_discovery
+from codex_switch.catalog import discover, endpoint, classification, enrich_models, make_catalog, model_info, official_metadata, bundled_metadata, merge_discovery
 from codex_switch.config import API_URL, PROVIDER, parse
 from codex_switch.errors import SwitchError
 from codex_switch.settings import read_state, write_state
@@ -25,7 +25,26 @@ class GatewayTests(unittest.TestCase):
         metadata = patch("codex_switch.service.official_metadata", return_value=({}, "unavailable"))
         metadata.start()
         self.addCleanup(metadata.stop)
+        bundled = patch("codex_switch.service.bundled_metadata", return_value={})
+        bundled.start()
+        self.addCleanup(bundled.stop)
     write_config = test_service.ServiceTests.write_config
+
+    def test_saved_catalog_detects_external_model_outside_selection(self):
+        self.service.setup("fixture")
+        values = [{"id": "gpt-native", "enabled": False, "context_window": 32768, "reasoning": [], "images": False}]
+        native = model_info("gpt-native", 200000, ["high"])
+        with patch("codex_switch.service.discover", return_value=values), patch("codex_switch.service.bundled_metadata", return_value={"gpt-native": native}):
+            self.service.sync_models()
+        self.assertEqual(self.service.status()["models"][0]["capability_source"], "bundled")
+        self.service.configure_model("gpt-native", True, 65536)
+        self.service.reset_capabilities("gpt-native")
+        self.assertEqual(self.service.status()["models"][0]["capability_source"], "bundled")
+        self.service.apply_models("gpt-native", selected=["gpt-native"], activate=True)
+        self.assertTrue(self.service.status()["catalog_configured"])
+        self.assertFalse(self.service.status()["catalog_model_mismatch"])
+        self.write_config(self.service.config.read().replace(b'model = "gpt-native"', b'model = "outside-menu"'))
+        self.assertTrue(self.service.status()["catalog_model_mismatch"])
 
     def test_batch_selection_preserves_native_metadata_and_rolls_back_invalid_selection(self):
         self.service.setup("fixture")
@@ -266,6 +285,31 @@ class GatewayTests(unittest.TestCase):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_bundled_models_fill_remote_gaps_without_claiming_remote_access(self):
+        remote = model_info("gpt-old", 32768)
+        native = model_info("gpt-6.1-sol", 200000, ["low", "high"])
+        fresh = [{"id": n, "enabled": False, "context_window": 32768, "reasoning": [], "images": False} for n in ("gpt-old", "gpt-6.1-sol", "unknown-alias")]
+        models = enrich_models(fresh, {"gpt-old": remote}, {"gpt-6.1-sol": native})
+        self.assertEqual(models[1]["category"], "candidate")
+        self.assertEqual(models[1]["metadata_source"], "bundled")
+        self.assertEqual(models[1]["context_window"], 200000)
+        self.assertEqual(models[0]["metadata_source"], "official")
+        self.assertEqual(models[2]["category"], "other")
+        self.assertFalse(any(m["enabled"] for m in models))
+        models[1]["enabled"] = True
+        self.assertEqual(make_catalog(models)["models"], [dict(native, upgrade=None)])
+
+    def test_bundled_metadata_isolated_from_user_home_and_gateway(self):
+        native = model_info("gpt-6.1-sol", 200000)
+        hidden = dict(native, slug="hidden", visibility="hide")
+        with patch("codex_switch.catalog.shutil.which", return_value="codex-fixture"), patch("codex_switch.catalog.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=json.dumps({"models": [native, hidden]}).encode())) as run:
+            self.assertEqual(bundled_metadata(API_URL), {"gpt-6.1-sol": native})
+            self.assertEqual(run.call_args.args[0], ["codex-fixture", "debug", "models", "--bundled"])
+            self.assertNotEqual(run.call_args.kwargs["env"]["CODEX_HOME"], str(Path.home()/".codex"))
+            run.reset_mock()
+            self.assertEqual(bundled_metadata("https://gateway.example/v1"), {})
+            run.assert_not_called()
+
     def test_authoritative_metadata_uses_client_version_and_keeps_exact_entries(self):
         entry = model_info("gpt-native", 200000, ["low", "high"], True)
         reply = io.BytesIO(json.dumps({"models": [entry]}).encode())

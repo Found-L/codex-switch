@@ -31,7 +31,7 @@ Screenshots are offscreen renders of the actual QML interface with isolated fixt
 
 One New API URL and token can route multiple suppliers by model ID. Search, select multiple coding candidates, choose a default and apply once. Obvious audio/image/embedding models are hidden by default and blocked from generated menus. Unknown aliases remain under All. Draft checkboxes do not write config.
 
-Discovery reads the model list without inference. For the official OpenAI endpoint only, it also attempts an authenticated, client-version-matched Codex catalog lookup, intersecting exact visible API-supported IDs with the public list and preserving official instructions and settings. Gateway keys are never sent to OpenAI. Labels distinguish official metadata from unverified basic templates; neither proves inference access. Manual overrides are under each row's advanced menu and can be reset. Reload Codex after applying; account settings restore when switching back.
+Discovery reads the model list without inference. For the official OpenAI endpoint only, it also attempts an authenticated, client-version-matched Codex catalog lookup, intersecting exact visible API-supported IDs with the public list and preserving official instructions and settings. Gateway keys are never sent to OpenAI. Missing official entries can use exact defaults from the installed Codex bundled catalog, labeled Codex defaults / API untested. Labels distinguish remote metadata, bundled defaults and basic templates; none proves inference access. Manual overrides are under each row's advanced menu and can be reset. Fully quit and restart Codex after applying; account settings restore when switching back.
 
 ```text
 codex-switch setup --base-url https://your-gateway/v1
@@ -67,7 +67,7 @@ Without a custom catalog, switching updates only the top-level provider in globa
 
 Existing official-OpenAI `openai_api` configurations can be reused without migrating credentials. Other providers are not forcibly replaced. A selected profile overriding `model_provider` blocks global switching.
 
-The UI shows global configuration, not the billing route of an already running chat. Existing chats, desktop prewarming/catalog caches, project configs and explicit CLI overrides can differ. Reload Codex if a full menu refresh is needed. The app does not terminate Codex.
+Selection replaces the catalog at startup; it does not mirror or edit the current desktop menu. The UI shows global configuration, not the billing route of an already running chat. Existing chats, desktop prewarming/catalog caches, project configs and explicit CLI overrides can differ. Fully quit and restart Codex if a full menu refresh is needed. The app does not terminate Codex.
 
 Setup is local and does not send requests to verify API access. Availability, modes, quota and key validity depend on the selected gateway and upstream. Discovery reads the published model list; explicit user selections form the custom catalog. Switching itself makes no network/model requests. Requires a Codex build supporting command-backed provider authentication; catalog baseline: `rust-v0.162.1`, tested locally with CLI `0.166.0-alpha.6` model/list. Release targets: Windows 10/11 x64 and macOS 14+ Apple Silicon/Intel. Linux is unsupported.
 

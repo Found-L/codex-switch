@@ -108,7 +108,7 @@ def main(argv=None):
                                         [e.strip() for e in args.reasoning.split(",") if e.strip()], args.images)
             elif args.model_command == "apply":
                 service.apply_models(args.default_model, selected=args.select, activate=args.use)
-                print("Catalog saved. Reload Codex to refresh its model menu. Compatibility has not been tested.")
+                print("Catalog saved. Fully quit and restart Codex to refresh its model menu. Compatibility has not been tested.")
             elif args.model_command == "reset":
                 service.reset_models()
             print(json.dumps(service.status()["models"], ensure_ascii=False, indent=2))

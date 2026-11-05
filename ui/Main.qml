@@ -350,7 +350,7 @@ Window {
             wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
             Behavior on opacity { NumberAnimation { duration: 150 } }
         }
-        Text { visible: !bridge.compact; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: root.t("连接供新会话使用；目录更新需重载 Codex。", "New chats use this connection. Reload Codex for catalogs."); color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
+        Text { visible: !bridge.compact; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: root.t("连接供新会话使用；目录更新需完全退出并重启 Codex。", "New chats use this connection. Fully quit and restart Codex for catalogs."); color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
         Text { visible: !bridge.compact; anchors.right: parent.right; anchors.rightMargin: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: bridge.language === "zh" ? "EN" : "中"; color: "#8c90a0"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.toggleLanguage() } }
     }
 }
