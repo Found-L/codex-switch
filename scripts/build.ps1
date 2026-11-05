@@ -1,4 +1,4 @@
-param([string]$Version = '0.4.0', [switch]$SkipInstaller, [string]$IsccPath)
+param([string]$Version = '0.4.1', [switch]$SkipInstaller, [string]$IsccPath)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $originalBuildPath = $env:PATH

@@ -156,7 +156,35 @@ class Bridge(QObject):
         return zh if self._language == "zh" else en
 
     def _safe_error(self, error):
-        return str(error) if isinstance(error, SwitchError) else self.tr_text("无法保存本地配置，请检查权限后重试。", "Cannot update local configuration. Check permissions and retry.")
+        if not isinstance(error, SwitchError):
+            return self.tr_text("操作未完成，请检查连接和本地权限后重试。", "Operation failed. Check the connection and local permissions, then retry.")
+        message = str(error)
+        translations = {
+            "Save the API connection in Codex Switch before synchronizing models.": "请先在「API 配置」中保存接口地址和 Key，再同步模型。",
+            "Cannot read the existing API key. Repair the credential helper or save a new API connection.": "无法读取已有 API Key，请检查旧版取钥程序，或在「API 配置」中保存连接。",
+            "The legacy API authentication is ambiguous. Save a new API connection first.": "旧版 API 同时配置了多种认证方式，请在「API 配置」中重新保存连接。",
+            "The legacy credential helper is invalid. Repair it or save a new API connection.": "旧版取钥程序配置无效，请修复后重试，或在「API 配置」中保存连接。",
+            "The legacy API endpoint is not supported. Save a new API connection first.": "此旧版接口暂不支持直接沿用，请在「API 配置」中保存连接。",
+            "The API provider changed. Sync and apply the models again.": "API 连接已变化，请重新同步并应用模型目录。",
+            "Cannot read the model list. Check the API address, certificate and network.": "无法获取模型名单，请检查 API 地址、证书和网络连接。",
+            "No models were returned for this key. Check New API groups and token model limits.": "接口未返回模型，请检查 Key 的分组和模型权限。",
+            "Enable at least one coding model before applying the catalog.": "请先启用并保存至少一个编程模型，再应用目录。",
+            "Choose an enabled model as the default.": "请先启用并保存当前模型，再将它设为默认模型。",
+            "Connection changed during synchronization. Retry.": "同步期间连接发生变化，请重新同步。",
+            "The model list or settings changed. Apply the updated catalog before switching to API.": "模型名单或设置有待应用的更改，请先应用目录，再切到 API。",
+            "Context window must be an integer.": "上下文长度必须填写整数。",
+            "Context window must be between 4096 and 4000000 tokens.": "上下文长度须在 4096 到 4000000 tokens 之间。",
+            "Unsupported or duplicate reasoning level.": "推理档位不受支持或重复，请检查填写内容。",
+            "Enter the key for the new API address. A saved key is never reused on another endpoint.": "更换 API 地址时，请输入该地址对应的 Key。",
+            "API key cannot be empty or contain spaces/control characters.": "API Key 不能为空，也不能包含空格或控制字符。",
+            "Use an HTTPS API base URL without credentials, query or fragment (HTTP only for loopback).": "请填写 HTTPS 接口地址，不要带账号密码、查询参数或 #；HTTP 仅支持本机地址。",
+        }
+        if self._language == "zh":
+            if message.startswith("Model discovery failed (HTTP "):
+                code = message.split("HTTP ", 1)[1].split(")", 1)[0]
+                return "同步失败（HTTP " + code + "），请检查地址、Key 和模型权限。"
+            return translations.get(message, message)
+        return message
 
     def _set_notice(self, text, error=False):
         self._notice, self._is_error = text, error
@@ -260,6 +288,10 @@ class Bridge(QObject):
 
     @Slot()
     def syncModels(self):
+        if not self._state.get("api_ready"):
+            self.openPage.emit("key")
+            self._set_notice(self.tr_text("请先保存 API 地址和 Key，再同步模型。", "Save the API URL and key before discovering models."), True)
+            return
         self._submit(self.service.sync_models, "sync-models")
 
     @Slot()
@@ -555,6 +587,14 @@ def self_test(report, native=False):
                 raise RuntimeError("Required persistent controls are missing.")
             if window.findChild(QObject, "modelField") is not None:
                 raise RuntimeError("Model selection must remain in Codex.")
+            model.openPage.emit("models")
+            model.syncModels()
+            app.processEvents()
+            if model.busy or window.property("page") != "key" or "API 地址" not in model.notice:
+                raise RuntimeError("Missing API setup did not show localized navigation guidance.")
+            if window.findChild(QObject, "applyModelButton").property("visible"):
+                raise RuntimeError("Empty model lists must not show apply controls.")
+            model.clearNotice()
 
             def wait_idle():
                 loop = QEventLoop()
@@ -627,6 +667,15 @@ def self_test(report, native=False):
             wait_idle()
             if model.state["model"] != "gateway-second-model" or not model.state["catalog_active"]:
                 raise RuntimeError("Gateway catalog was not applied.")
+            model._set_notice(model._safe_error(SwitchError("Cannot read the model list. Check the API address, certificate and network.")), True)
+            app.processEvents()
+            area = window.findChild(QObject, "pagesArea")
+            notice = window.findChild(QObject, "noticeText")
+            if area.property("y") + area.property("height") > notice.property("y"):
+                raise RuntimeError("Error notice overlaps the page actions.")
+            if "无法获取模型名单" not in model.notice:
+                raise RuntimeError("Model errors were not localized.")
+            model.clearNotice()
             model.switchTo("account")
             wait_idle()
             if model.state["model"] or model.state["catalog_active"]:
@@ -641,6 +690,7 @@ def self_test(report, native=False):
                       "page_transition_no_overlap": True,
                       "native_keychain": native,
                       "gateway_catalog_flow": True,
+                      "empty_model_guidance": True, "notice_no_overlap": True,
                       "mini_window": True, "single_instance": True, "setup_entry_count": 1}
             model.shutdown()
             window.close()

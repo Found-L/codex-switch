@@ -1,5 +1,8 @@
 import json
 import hashlib
+import os
+import subprocess
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 import threading
@@ -18,6 +21,52 @@ from codex_switch.settings import read_state, write_state
 class GatewayTests(unittest.TestCase):
     setUp = test_service.ServiceTests.setUp
     write_config = test_service.ServiceTests.write_config
+
+    def test_existing_legacy_api_sync_apply_and_cleanup_keep_external_credentials(self):
+        raw = b'model_provider="openai_api"\nmodel="original-model"\nservice_tier="priority"\n[model_providers.openai_api]\nbase_url="https://api.openai.com/v1"\nwire_api="responses"\nenv_key="SWITCH_TEST_LEGACY_KEY"\n'
+        self.write_config(raw)
+        values = [{"id": "model-a", "enabled": False, "context_window": 32768, "reasoning": [], "images": False, "status": "unverified"}]
+        with patch.dict(os.environ, {"SWITCH_TEST_LEGACY_KEY": "legacy-test-secret"}):
+            with patch("codex_switch.service.discover", return_value=values) as discovery:
+                self.service.sync_models()
+                discovery.assert_called_once_with(API_URL, "legacy-test-secret")
+            self.assertEqual(self.service.config.read(), raw)
+            self.assertIsNone(self.credentials.read())
+            self.service.configure_model("model-a", True)
+            self.service.apply_models("model-a")
+            self.assertEqual(self.service.status()["provider"], "openai_api")
+            self.assertTrue(self.service.status()["catalog_active"])
+            self.service.use("account")
+            self.assertEqual(self.service.status()["model"], "original-model")
+            self.service.use("api")
+            self.service.remove_api()
+            self.assertEqual(parse(self.service.config.read()), parse(raw))
+            self.assertFalse(self.service.status()["catalog_enabled"])
+            self.assertIsNone(self.credentials.read())
+            for file in self.home.rglob("*"):
+                if file.is_file(): self.assertNotIn(b"legacy-test-secret", file.read_bytes())
+
+    def test_legacy_helper_is_piped_without_shell_or_secret_error_output(self):
+        self.write_config(b'[model_providers.openai_api]\nbase_url="https://api.openai.com/v1"\n[model_providers.openai_api.auth]\ncommand="existing-helper"\nargs=["--read"]\n')
+        with patch("codex_switch.service.subprocess.run", return_value=SimpleNamespace(stdout=b"legacy-test-secret\r\n", returncode=0)) as run:
+            key = self.service._discovery_credential(self.service.status())
+            self.assertEqual(key, "legacy-test-secret")
+            self.assertEqual(run.call_args.args[0], ["existing-helper", "--read"])
+            self.assertFalse(run.call_args.kwargs.get("shell", False))
+            self.assertEqual(run.call_args.kwargs["stderr"], subprocess.DEVNULL)
+        with patch("codex_switch.service.subprocess.run", return_value=SimpleNamespace(stdout=b"legacy-test-secret", returncode=1)):
+            with self.assertRaises(SwitchError) as error: self.service._discovery_credential(self.service.status())
+            self.assertNotIn("legacy-test-secret", str(error.exception))
+
+    def test_legacy_key_rotation_during_sync_rejects_stale_results(self):
+        self.write_config(b'[model_providers.openai_api]\nbase_url="https://api.openai.com/v1"\nenv_key="SWITCH_TEST_LEGACY_KEY"\n')
+        with patch.dict(os.environ, {"SWITCH_TEST_LEGACY_KEY": "old-fixture"}):
+            def rotate(*args):
+                os.environ["SWITCH_TEST_LEGACY_KEY"] = "new-fixture"
+                return []
+            with patch("codex_switch.service.discover", side_effect=rotate):
+                with self.assertRaises(SwitchError): self.service.sync_models()
+        self.assertEqual(read_state(self.home), {})
     def test_gateway_catalog_roundtrip_and_reapply_restore_account(self):
         original = b'model="account-model"\nservice_tier="priority"\nmodel_reasoning_effort="xhigh"\nmodel_catalog_json="account.json"\n[mcp_servers.keep]\ncommand="keep"\n'
         self.write_config(original)

@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import sys
 import tomllib
+import subprocess
 
 from .config import API_URL, LEGACY, PROVIDER, ConfigFile, default_home, lock, parse, patch
 from .credentials import default_credentials, HelperCredentials
@@ -92,7 +93,7 @@ class SwitchService:
                      and not any(k in own for k in ("env_key", "experimental_bearer_token", "requires_openai_auth")))
         else:
             api_id = LEGACY if legacy.get("base_url", "").rstrip("/") == API_URL and not legacy.get("requires_openai_auth") else PROVIDER
-            ready = api_id == LEGACY and (bool(legacy.get("auth", {}).get("command")) or bool(legacy.get("env_key")) or bool(legacy.get("experimental_bearer_token")))
+            ready = api_id == LEGACY and legacy.get("wire_api", "responses") == "responses" and (bool(legacy.get("auth", {}).get("command")) or bool(legacy.get("env_key")) or bool(legacy.get("experimental_bearer_token")))
         mode = "account" if current == "openai" else "api" if current in (PROVIDER, LEGACY) else "other"
         profile = config.get("profile")
         override = config.get("profiles", {}).get(profile, {}).get("model_provider") if profile else None
@@ -132,7 +133,7 @@ class SwitchService:
     def _model_settings(self, doc, connection, mode):
         """Restore account values before changing endpoints or leaving the catalog."""
         if "account_settings" in connection:
-            if doc.get("model_provider") != PROVIDER or doc.get("model_catalog_json") != connection.get("active_catalog"):
+            if doc.get("model_provider") != connection.get("active_provider", PROVIDER) or doc.get("model_catalog_json") != connection.get("active_catalog"):
                 raise SwitchError("Model catalog changed outside Codex Switch. Restore the managed catalog before switching.")
             connection["api_model"] = doc.get("model", connection.get("api_model"))
             for key in MODEL_KEYS:
@@ -142,6 +143,7 @@ class SwitchService:
                     doc.pop(key, None)
             del connection["account_settings"]
             connection.pop("active_catalog", None)
+            connection.pop("active_provider", None)
         if mode == "api" and connection.get("catalog"):
             path = Path(connection["catalog"])
             if not path.is_file() or path.parent != self.home / "codex-switch" / "catalogs":
@@ -158,6 +160,7 @@ class SwitchService:
             if entry.get("default_reasoning_level"):
                 doc["model_reasoning_effort"] = entry["default_reasoning_level"]
             connection["active_catalog"] = str(path)
+            connection["active_provider"] = connection.get("catalog_provider", PROVIDER)
 
     def use(self, mode):
         if mode not in ("api", "account"):
@@ -174,6 +177,8 @@ class SwitchService:
                 raise SwitchError("Sync, configure and apply gateway models before switching to this API.")
             if mode == "api" and state["catalog_enabled"] and state["catalog_dirty"]:
                 raise SwitchError("The model list or settings changed. Apply the updated catalog before switching to API.")
+            if mode == "api" and state["catalog_enabled"] and read_state(self.home).get("catalog_provider", PROVIDER) != state["api_provider"]:
+                raise SwitchError("The API provider changed. Sync and apply the models again.")
             original = self.config.read()
             before = parse(original)
             connection = read_state(self.home)
@@ -219,7 +224,7 @@ class SwitchService:
                 self._model_settings(expected, connection, "account")
                 if url != API_URL and expected.get("model_provider") == PROVIDER:
                     expected["model_provider"] = "openai"
-                for name in ("models", "catalog", "api_model", "catalog_dirty"):
+                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider"):
                     connection.pop(name, None)
             connection["base_url"] = url
             providers = expected.setdefault("model_providers", {})
@@ -275,17 +280,51 @@ class SwitchService:
             original = self.config.read()
             connection = read_state(self.home)
             state = self.status()
-            if state["api_provider"] != PROVIDER or not state["api_ready"]:
+            if not state["api_ready"]:
                 raise SwitchError("Save the API connection in Codex Switch before synchronizing models.")
-            key = self.credential()
+            key = self._discovery_credential(state)
         fresh = discover(state["base_url"], key)
         with lock(self.home):
-            if self.config.read() != original or self.credentials.read() != key or read_state(self.home) != connection:
+            if self.config.read() != original or self._discovery_credential(self.status()) != key or read_state(self.home) != connection:
                 raise SwitchError("Connection changed during synchronization. Retry.")
             connection["models"] = merge_discovery(fresh, connection.get("models", []))
             connection["catalog_dirty"] = True
+            connection["models_provider"] = state["api_provider"]
+            if self.track:
+                register_home(self.home)
             write_state(self.home, connection)
         return self.status()
+
+    def _discovery_credential(self, state):
+        if not state["api_ready"]:
+            raise SwitchError("Save the API connection in Codex Switch before synchronizing models.")
+        if state["api_provider"] == PROVIDER:
+            return self.credential()
+        legacy = parse(self.config.read()).get("model_providers", {}).get(LEGACY, {})
+        if state["api_provider"] != LEGACY or legacy.get("base_url", "").rstrip("/") != API_URL or legacy.get("requires_openai_auth"):
+            raise SwitchError("The legacy API endpoint is not supported. Save a new API connection first.")
+        auth = legacy.get("auth", {})
+        methods = sum(bool(value) for value in (auth.get("command"), legacy.get("env_key"), legacy.get("experimental_bearer_token")))
+        if methods != 1:
+            raise SwitchError("The legacy API authentication is ambiguous. Save a new API connection first.")
+        if auth.get("command"):
+            args = auth.get("args", [])
+            if not isinstance(auth["command"], str) or not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+                raise SwitchError("The legacy credential helper is invalid. Repair it or save a new API connection.")
+            try:
+                result = subprocess.run([auth["command"], *args], stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15,
+                                        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
+                key = result.stdout.decode("utf-8-sig").strip() if result.returncode == 0 else ""
+            except (OSError, UnicodeError, subprocess.TimeoutExpired):
+                key = ""
+        elif legacy.get("env_key"):
+            key = os.environ.get(legacy["env_key"], "").strip()
+        else:
+            key = legacy.get("experimental_bearer_token", "").strip()
+        if not key or len(key.encode("utf-8")) > 2560 or any(c.isspace() or ord(c) < 32 for c in key):
+            raise SwitchError("Cannot read the existing API key. Repair the credential helper or save a new API connection.")
+        return key
 
     def reset_models(self):
         with lock(self.home):
@@ -295,7 +334,7 @@ class SwitchService:
             self._model_settings(expected, connection, "account")
             if expected.get("model_provider") == PROVIDER and connection.get("base_url", API_URL) != API_URL:
                 expected["model_provider"] = "openai"
-            for name in ("models", "catalog", "api_model", "catalog_dirty"):
+            for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider"):
                 connection.pop(name, None)
             def change(doc):
                 for name in (*MODEL_KEYS, "model_provider"):
@@ -324,7 +363,7 @@ class SwitchService:
     def apply_models(self, default_model=None):
         with lock(self.home):
             state = self.status()
-            if state["api_provider"] != PROVIDER or not state["api_ready"] or state["mode"] == "other" or state["profile_override"]:
+            if not state["api_ready"] or state["mode"] == "other" or state["profile_override"]:
                 raise SwitchError("The managed API connection is not ready, or a profile overrides it.")
             original = self.config.read()
             expected = parse(original)
@@ -332,6 +371,8 @@ class SwitchService:
             if any(k in profile for k in MODEL_KEYS):
                 raise SwitchError("The selected profile overrides model settings; catalog was not applied.")
             connection = read_state(self.home)
+            if connection.get("models_provider", PROVIDER) != state["api_provider"]:
+                raise SwitchError("The API provider changed. Sync and apply the models again.")
             catalog = make_catalog(connection.get("models", []))
             if default_model and default_model not in [m["slug"] for m in catalog["models"]]:
                 raise SwitchError("Choose an enabled model as the default.")
@@ -339,6 +380,7 @@ class SwitchService:
             path = self.home / "codex-switch" / "catalogs" / (hashlib.sha256(content).hexdigest() + ".json")
             atomic_json(path, catalog)
             connection["catalog"] = str(path)
+            connection["catalog_provider"] = state["api_provider"]
             connection["catalog_dirty"] = False
             if default_model:
                 connection["api_model"] = default_model
@@ -371,9 +413,10 @@ class SwitchService:
             own = expected.get("model_providers", {}).get(PROVIDER)
             if own is not None and not self.managed(own):
                 raise SwitchError("Provider ID belongs to another tool; removal was stopped.")
-            if own is not None:
+            if own is not None or "account_settings" in connection or connection.get("catalog") or connection.get("models"):
                 self._model_settings(expected, connection, "account")
-                del expected["model_providers"][PROVIDER]
+                if own is not None:
+                    del expected["model_providers"][PROVIDER]
                 if expected.get("model_provider") == PROVIDER:
                     expected["model_provider"] = "openai"
 
@@ -383,8 +426,9 @@ class SwitchService:
                             doc[name] = expected[name]
                         else:
                             doc.pop(name, None)
-                    del doc["model_providers"][PROVIDER]
-                    if not doc["model_providers"]:
+                    if own is not None:
+                        del doc["model_providers"][PROVIDER]
+                    if "model_providers" in doc and not doc["model_providers"]:
                         # Materialize an empty parent; implicit TOML tables otherwise vanish.
                         doc["model_providers"] = {}
                     if doc.get("model_provider") == PROVIDER:
@@ -393,7 +437,7 @@ class SwitchService:
                 updated = patch(original, change)
                 if parse(updated) != expected:
                     raise SwitchError("Cannot safely remove the managed provider.")
-                for name in ("models", "catalog", "api_model", "catalog_dirty"):
+                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider"):
                     connection.pop(name, None)
                 self._commit(original, updated, connection)
             self.credentials.delete()

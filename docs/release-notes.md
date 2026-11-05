@@ -1,3 +1,12 @@
+## Codex Switch v0.4.1
+
+- 修复已有 `openai_api` 显示连接可用、点击同步却要求重新保存 Key 的问题。指向 OpenAI 官方的旧版连接可直接沿用已有 command/env/token 认证，同步不会复制密钥或重写提供商配置。
+- 旧版提供商也支持应用/撤销模型目录与账号设置恢复；卸载时保留原提供商及其凭据。
+- 空模型页新增连接/同步引导，隐藏空选择框与保存/应用按钮；中文界面补齐同步相关错误翻译。
+- 修复底部错误提示压住应用按钮的问题，冻结 GUI 自检增加空列表和提示布局检查。
+
+Fix legacy OpenAI API discovery without re-entering credentials, empty-state guidance, Chinese error messages and overlapping notices. No model inference is performed during discovery.
+
 ## Codex Switch v0.4.0
 
 - API 配置支持自定义 HTTPS Base URL，可接 New API、多供应商网关和 DeepSeek 等兼容 Responses 的接口。

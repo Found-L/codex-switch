@@ -41,6 +41,9 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-render-") as home:
     bridge.openPage.emit("terminal")
     settle()
     window.grabWindow().save(str(destination / "terminal.png"))
+    bridge.openPage.emit("models")
+    settle()
+    window.grabWindow().save(str(destination / "models-empty.png"))
     from unittest.mock import patch
     service.setup("gateway-fixture", "https://gateway.example/v1")
     entries = [{"id": name, "enabled": False, "context_window": 32768, "reasoning": [], "images": False, "status": "unverified"}
@@ -52,6 +55,11 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-render-") as home:
     bridge.openPage.emit("models")
     settle()
     window.grabWindow().save(str(destination / "models.png"))
+    from codex_switch.errors import SwitchError
+    bridge._set_notice(bridge._safe_error(SwitchError("Cannot read the model list. Check the API address, certificate and network.")), True)
+    settle()
+    window.grabWindow().save(str(destination / "models-error.png"))
+    bridge.clearNotice()
     bridge.openPage.emit("terminal")
     settle()
     bridge.toggleLanguage()

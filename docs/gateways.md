@@ -1,6 +1,8 @@
 # New API 与自定义 API
 
-v0.4.0 支持配置 HTTPS Base URL 和对应 Key，适用于 New API、DeepSeek 等兼容 Responses 的接口。HTTP 仅允许本机 loopback。工具保存一个 API 连接；多个供应商由 New API 聚合，用模型 ID 路由，不需要为每家切 Key。
+v0.4.0 起支持配置 HTTPS Base URL 和对应 Key，适用于 New API、DeepSeek 等兼容 Responses 的接口。HTTP 仅允许本机 loopback。工具保存一个 API 连接；多个供应商由 New API 聚合，用模型 ID 路由，不需要为每家切 Key。
+
+v0.4.1 起，已有指向 OpenAI 官方的 `openai_api` 连接也能直接同步和应用目录，无需重新输入 Key。沿用原来唯一的 command/env/token 认证，不复制密钥、不改写原提供商；取钥程序失败或认证方式冲突时给出明确提示。仅有账号登录时不能查询 API 模型，需配置 API 连接。
 
 ## 窗口操作
 
