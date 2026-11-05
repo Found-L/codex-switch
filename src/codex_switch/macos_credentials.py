@@ -146,13 +146,16 @@ class MacOSCredentials:
             owned.append(value)
             fields = self._fields(owned)
             query = self._dictionary(fields, owned)
-            updates = {"kSecValueData": value, "kSecAttrAccess": self._access(owned)}
+            # Replacing an existing access list is an owner/ACL edit and can
+            # require an extra system authorization even for the same helper.
+            # Key rotation changes only the secret; set the ACL on first add.
+            updates = {"kSecValueData": value}
             updated = self._dictionary(updates, owned)
             self._trace("update item")
             status = self.security.SecItemUpdate(query, updated)
             if status == self.NOT_FOUND:
                 self._trace("add item")
-                status = self.security.SecItemAdd(self._dictionary({**fields, **updates}, owned), None)
+                status = self.security.SecItemAdd(self._dictionary({**fields, **updates, "kSecAttrAccess": self._access(owned)}, owned), None)
                 if status == self.DUPLICATE:
                     status = self.security.SecItemUpdate(query, updated)
             self._check(status)

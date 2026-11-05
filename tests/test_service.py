@@ -196,6 +196,8 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(store.read())
         store.write("credential-store-fixture")
         self.assertEqual(store.read(), "credential-store-fixture")
+        store.write("credential-store-updated-fixture")
+        self.assertEqual(store.read(), "credential-store-updated-fixture")
         self.assertNotEqual(target_for(self.home), target_for(self.home / "another"))
         store.delete()
         self.assertIsNone(store.read())
