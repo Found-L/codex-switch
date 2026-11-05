@@ -1,3 +1,13 @@
+## Codex Switch v0.6.0
+
+- 模型页新增「状态对照」，分别显示全局配置、已保存目录、编辑草稿及独立的运行检查；明确配置差异不等于正在运行的会话异常。
+- 草稿默认值与配置模型分离，模型行标记已保存/配置项；可一键把配置模型加入草稿，保存前不写配置。账号模式下仍可查看已保存的 API 目录。
+- 「目录所选」改为「草稿所选」，空搜索显示实际勾选数量并提供清除入口；保存按钮明确会写入目录并切到 API。
+- 新增连接页只读检查与 `codex-switch runtime`：仅代理连接现有本机进程，读取模型 ID 与已加载会话数量；不可接入时显示未知。不会新建 app-server、启动推理或根据配置推断前台会话/计费连接。
+- 改善冻结 GUI 失败诊断，报告出错阶段；54 项测试与源码 QML 自检通过。
+
+Separate configuration, saved catalogs, drafts and optional existing-server snapshots. No foreground chat model or billing route is inferred. No model inference is performed.
+
 ## Codex Switch v0.5.1
 
 - 修复远端 Codex 元数据缺项时，当前客户端自带模型从候选列表消失的问题。仅对官方 OpenAI 地址，将当前 Key 名单与已安装 Codex 的可见内置条目精确匹配；保留原生指令和参数，并区分远端、内置与基础模板来源。

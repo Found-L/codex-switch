@@ -239,16 +239,21 @@ Window {
                 anchors.fill: parent
                 visible: root.displayedPage === "connections"
                 Rectangle {
-                    width: parent.width; height: 144; radius: 18; color: "white"; border.color: "#e4e6ef"
+                    width: parent.width; height: 104; radius: 18; color: "white"; border.color: "#e4e6ef"
                     Text { x: 20; y: 18; text: root.t("当前连接配置", "CURRENT CONFIGURATION"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10; font.letterSpacing: 0.4 }
                     Text { x: 20; y: 43; text: root.api ? (bridge.state.api_label || "API") : bridge.state.mode === "other" ? root.t("其他提供商", "Other provider") : root.t("Codex 账号", "Codex account"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 26; font.weight: Font.DemiBold }
-                    Rectangle { x: 21; y: 96; width: 6; height: 6; radius: 3; color: bridge.busy ? "#c5bded" : "#77b499"; Behavior on color { ColorAnimation { duration: 160 } } }
-                    Text { x: 35; y: 91; text: bridge.busy ? root.t("正在保存切换…", "Saving your connection…") : root.api ? root.t("使用自己的 Key，API 单独计费", "Your API key. Separate API billing.") : root.t("沿用 Codex 中的账号登录", "Use the account signed in to Codex."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11 }
+                    Text { x: 20; y: 80; width: parent.width - 40; elide: Text.ElideRight; text: root.t("配置模型：", "Configured model: ") + (bridge.state.model || root.t("Codex 默认", "Codex default")); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
                 }
-                ConnectionPicker { y: 162; width: parent.width }
-                SoftButton { x: 0; y: 280; width: parent.width - 52; height: 40; text: root.t("管理 API Key", "Manage API key"); onClicked: root.page = "key" }
-                SoftButton { x: parent.width - 42; y: 280; width: 42; height: 40; refreshIcon: true; enabled: !bridge.busy; onClicked: bridge.refresh() }
-                Text { y: 340; text: root.t("自定义接口请先在「模型」页同步并应用目录", "For gateways, sync and apply the Models catalog first."); color: "#a0a4b1"; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                ConnectionPicker { y: 116; width: parent.width }
+                SoftButton { x: 0; y: 226; width: parent.width - 52; height: 36; text: root.t("管理 API Key", "Manage API key"); onClicked: root.page = "key" }
+                SoftButton { x: parent.width - 42; y: 226; width: 42; height: 36; refreshIcon: true; enabled: !bridge.busy; onClicked: bridge.refresh() }
+                Rectangle {
+                    objectName: "runtimeSummary"; y: 274; width: parent.width; height: 78; radius: 13; color: "white"; border.color: "#e4e6ef"
+                    Text { x: 12; y: 10; text: root.t("会话运行状态 · 独立于配置", "Chat runtime · separate from config"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                    Text { anchors.right: parent.right; anchors.rightMargin: 12; y: 10; text: bridge.busy ? root.t("处理中", "Working") : root.t("只读检查", "Check"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; enabled: !bridge.busy; onClicked: bridge.inspectRuntime() } }
+                    Text { x: 12; y: 32; width: parent.width - 24; wrapMode: Text.WordWrap; text: bridge.runtimeState.status === "connected" ? root.t("已读到本机进程目录，当前会话模型与计费仍未知。", "Local server catalog read. Current chat model and billing remain unknown.") : root.t("未接入桌面；当前会话模型与计费连接未知。", "Desktop is not connected. Current model and billing route are unknown."); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                    Text { x: 12; y: 61; width: parent.width - 24; elide: Text.ElideRight; text: bridge.runtimeState.checked_at || root.t("检查不启动模型、不修改会话", "Check starts no model turn and changes no chat"); color: root.muted; font.pixelSize: 9 }
+                }
             }
 
             Item {
@@ -350,7 +355,7 @@ Window {
             wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
             Behavior on opacity { NumberAnimation { duration: 150 } }
         }
-        Text { visible: !bridge.compact; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: root.t("连接供新会话使用；目录更新需完全退出并重启 Codex。", "New chats use this connection. Fully quit and restart Codex for catalogs."); color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
+        Text { visible: !bridge.compact; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: root.t("配置不代表已有会话；目录保存后需完全退出并重启 Codex。", "Config is not a running chat. Quit and restart Codex to load catalogs."); color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
         Text { visible: !bridge.compact; anchors.right: parent.right; anchors.rightMargin: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: bridge.language === "zh" ? "EN" : "中"; color: "#8c90a0"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.toggleLanguage() } }
     }
 }

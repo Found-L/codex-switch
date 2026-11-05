@@ -99,7 +99,7 @@ class SwitchService:
         override = config.get("profiles", {}).get(profile, {}).get("model_provider") if profile else None
         catalog_configured = config.get("model_catalog_json") == connection.get("catalog") and bool(connection.get("catalog"))
         catalog_models = []
-        if catalog_configured:
+        if connection.get("catalog"):
             try:
                 catalog_path = Path(connection["catalog"])
                 if catalog_path.stat().st_size <= 1024 * 1024:
@@ -110,12 +110,18 @@ class SwitchService:
             "mode": mode, "provider": current, "api_provider": api_id,
             "api_ready": bool(ready), "managed_key": self.managed(own), "key_saved": key_saved,
             "model": config.get("model", ""), "codex_home": str(self.home),
+            "configuration_source": "config.toml",
+            "api_model": connection.get("api_model", ""),
+            "saved_model_ids": catalog_models,
+            "runtime_status": "not_inspected",
             "config_exists": self.config.path.exists(),
             "profile_override": override, "model_requests": 0,
             "base_url": connection.get("base_url", API_URL),
             "api_label": "OpenAI API" if connection.get("base_url", API_URL) == API_URL else "Custom API",
             "models": [{**{k: v for k, v in m.items() if k != "official_entry"},
                         "category": m.get("category", classification(m["id"])),
+                        "saved_in_catalog": m["id"] in catalog_models,
+                        "configured_model": m["id"] == config.get("model"),
                         "capability_source": "manual" if m.get("manual_capabilities") else m.get("metadata_source", "official") if m.get("official_entry") else "basic"}
                        for m in connection.get("models", [])],
             "metadata_status": connection.get("metadata_status", "not_requested"),

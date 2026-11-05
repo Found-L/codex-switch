@@ -9,15 +9,16 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-gui-report-") as temporary
     report = Path(temporary) / "result.json"
     native = "--native-keychain" in sys.argv[2:]
     result = subprocess.run([str(Path(sys.argv[1]).resolve()), "--self-test-keychain" if native else "--self-test", str(report)], timeout=30)
-    if result.returncode or not report.is_file():
+    if not report.is_file():
         raise SystemExit("Frozen GUI self-test did not complete.")
     data = json.loads(report.read_text("utf-8"))
-    if not data.get("ok"):
-        raise SystemExit("Frozen GUI startup failed: " + str(data.get("error_type")))
+    if result.returncode or not data.get("ok"):
+        raise SystemExit("Frozen GUI startup failed: " + str(data.get("error_type")) + "; phase=" + str(data.get("phase", "unknown")))
     assert data["persistent_controls"] and data["async_switching"] and data["mini_window"]
     assert data["page_transition_no_overlap"]
     assert data["gateway_catalog_flow"]
     assert data["empty_model_guidance"] and data["notice_no_overlap"]
     assert data["search_multi_select"]
+    assert data["state_comparison"]
     assert data["native_keychain"] == native
     print("Packaged Qt " + data["qt"] + " GUI passed: persistent scene, async switching, mini window.")

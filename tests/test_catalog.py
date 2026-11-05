@@ -43,8 +43,15 @@ class GatewayTests(unittest.TestCase):
         self.service.apply_models("gpt-native", selected=["gpt-native"], activate=True)
         self.assertTrue(self.service.status()["catalog_configured"])
         self.assertFalse(self.service.status()["catalog_model_mismatch"])
+        self.assertEqual(self.service.status()["saved_model_ids"], ["gpt-native"])
+        self.assertEqual(self.service.status()["runtime_status"], "not_inspected")
+        self.assertTrue(self.service.status()["models"][0]["saved_in_catalog"])
         self.write_config(self.service.config.read().replace(b'model = "gpt-native"', b'model = "outside-menu"'))
         self.assertTrue(self.service.status()["catalog_model_mismatch"])
+        self.assertFalse(self.service.status()["models"][0]["configured_model"])
+        self.service.use("account")
+        self.assertEqual(self.service.status()["saved_model_ids"], ["gpt-native"])
+        self.assertFalse(self.service.status()["catalog_configured"])
 
     def test_batch_selection_preserves_native_metadata_and_rolls_back_invalid_selection(self):
         self.service.setup("fixture")

@@ -63,6 +63,7 @@ def app_icon():
 
 class Bridge(QObject):
     stateChanged = Signal()
+    runtimeChanged = Signal()
     busyChanged = Signal()
     noticeChanged = Signal()
     languageChanged = Signal()
@@ -83,6 +84,7 @@ class Bridge(QObject):
         self.menu = None
         self._busy = False
         self._refreshing = False
+        self._runtime = {"status": "not_inspected", "models": []}
         self._notice, self._is_error = "", False
         self._closing, self._quit_when_idle = False, False
         self.settings = None if testing else QSettings("FoundL", "CodexSwitch")
@@ -113,6 +115,17 @@ class Bridge(QObject):
     @Property("QVariantMap", notify=stateChanged)
     def state(self):
         return self._state
+
+    @Property("QVariantMap", notify=runtimeChanged)
+    def runtimeState(self):
+        return self._runtime
+
+    @Slot()
+    def inspectRuntime(self):
+        from .runtime import inspect_runtime
+        def inspect():
+            return inspect_runtime(self.service.home)
+        self._submit(inspect, "runtime")
 
     @Property(bool, notify=busyChanged)
     def busy(self):
@@ -208,21 +221,25 @@ class Bridge(QObject):
 
         def work():
             error = None
+            output = None
             try:
-                operation()
+                output = operation()
             except Exception as exception:
                 error = self._safe_error(exception)
             try:
                 state = self.service.status()
             except Exception:
                 state = self._state
-            return {"kind": kind, "error": error, "state": state}
+            return {"kind": kind, "error": error, "state": state, "output": output}
 
         future = self.pool.submit(work)
         future.add_done_callback(lambda done: self._completed.emit(done.result()))
 
     @Slot(object)
     def _apply_result(self, result):
+        if result["kind"] == "runtime" and isinstance(result.get("output"), dict):
+            self._runtime = result["output"]
+            self.runtimeChanged.emit()
         if self._state != result["state"]:
             self._state = result["state"]
             self.stateChanged.emit()
@@ -236,7 +253,7 @@ class Bridge(QObject):
             self._set_notice(result["error"], True)
         elif result["kind"] in ("switch", "setup"):
             name = self._state.get("api_label", "API") if self._state["mode"] == "api" else self.tr_text("Codex 账号", "Codex account")
-            self._set_notice(self.tr_text("已切换到 " + name + "，请新建会话。", "Switched to " + name + ". Start a new chat."))
+            self._set_notice(self.tr_text("配置已切到 " + name + "；已有会话连接未验证。", "Configuration set to " + name + "; existing chat routes are unverified."))
             if result["kind"] == "setup":
                 self.keySaved.emit()
                 self.openPage.emit("models" if self._state.get("base_url") != "https://api.openai.com/v1" else "connections")
@@ -576,6 +593,7 @@ def self_test(report, native=False):
     result = {"ok": False}
     model = None
     native_service = None
+    phase = "startup"
     try:
         if native and (sys.platform != "darwin" or os.environ.get("CODEX_SWITCH_NO_KEYCHAIN_UI") != "1"):
             raise RuntimeError("Native Keychain GUI smoke is restricted to noninteractive macOS tests.")
@@ -625,6 +643,7 @@ def self_test(report, native=False):
                 if model.busy or model.isError:
                     raise RuntimeError("Asynchronous UI operation did not complete.")
 
+            phase = "setup-and-switch"
             model.saveKey("qt-fixture-not-real")
             wait_idle()
             if model.state["mode"] != "api": raise RuntimeError("API setup did not switch.")
@@ -636,6 +655,7 @@ def self_test(report, native=False):
             for name, original in objects.items():
                 if window.findChild(QObject, name) is not original:
                     raise RuntimeError("A state update rebuilt the scene.")
+            phase = "page-transitions"
             for page in ("key", "models", "terminal", "connections"):
                 samples = []
                 loop = QEventLoop()
@@ -661,6 +681,7 @@ def self_test(report, native=False):
             app.processEvents()
             # Exercise the actual asynchronous gateway flow without any external request.
             from unittest.mock import patch as mock_patch
+            phase = "gateway-setup"
             model.saveConnection("gateway-qt-fixture", "https://gateway.example/v1")
             wait_idle()
             fixture = [{"id": "gateway-coding-model", "enabled": False, "context_window": 32768,
@@ -669,6 +690,7 @@ def self_test(report, native=False):
                         "reasoning": [], "images": False, "status": "unverified"},
                        {"id": "gpt-image-1", "enabled": False, "context_window": 32768,
                         "reasoning": [], "images": False, "status": "unverified"}]
+            phase = "gateway-models"
             with mock_patch("codex_switch.service.discover", return_value=fixture):
                 model.syncModels()
                 wait_idle()
@@ -690,6 +712,31 @@ def self_test(report, native=False):
             app.processEvents()
             if objects["gatewayModelList"].property("count") != 1:
                 raise RuntimeError("Model search did not filter the list.")
+            phase = "state-comparison"
+            picker.setProperty("scope", "selected")
+            search.setProperty("text", "missing-search")
+            app.processEvents()
+            if objects["gatewayModelList"].property("count") != 0 or len(picker.property("selectedIds").toVariant()) != 2:
+                raise RuntimeError("Search results were confused with the selection count.")
+            panel = window.findChild(QObject, "modelStatePanel")
+            if panel is None or window.findChild(QObject, "runtimeSummary") is None:
+                raise RuntimeError("Independent state panels are missing.")
+            panel.setProperty("visible", True)
+            before = service.config.read()
+            # Add the configured model to the local draft, without any config write.
+            model._state = dict(model.state, model="gateway-second-model")
+            model.stateChanged.emit()
+            QMetaObject.invokeMethod(picker, "includeConfigured", Qt.DirectConnection)
+            if service.config.read() != before or picker.property("defaultId") != "gateway-second-model":
+                raise RuntimeError("Add configured model failed or wrote the draft early.")
+            model._state = service.status()
+            model.stateChanged.emit()
+            panel.setProperty("visible", False)
+            with mock_patch("codex_switch.runtime.inspect_runtime", return_value={"status": "unavailable", "models": [], "foreground_model": None, "billing_route_verified": False}):
+                model.inspectRuntime()
+                wait_idle()
+            if model.runtimeState["status"] != "unavailable" or service.config.read() != before:
+                raise RuntimeError("Runtime inspection changed config or inferred a live connection.")
             if service.status()["catalog_enabled"] or any(m["enabled"] for m in service.status()["models"]):
                 raise RuntimeError("Draft selection wrote configuration before apply.")
             search.setProperty("text", "")
@@ -736,7 +783,7 @@ def self_test(report, native=False):
                       "persistent_controls": True, "async_switching": True,
                       "page_transition_no_overlap": True,
                       "native_keychain": native,
-                      "gateway_catalog_flow": True, "search_multi_select": True,
+                      "gateway_catalog_flow": True, "search_multi_select": True, "state_comparison": True,
                       "empty_model_guidance": True, "notice_no_overlap": True,
                       "mini_window": True, "single_instance": True, "setup_entry_count": 1}
             model.shutdown()
@@ -746,7 +793,7 @@ def self_test(report, native=False):
             app.processEvents()
             model = None
     except Exception as error:
-        result = {"ok": False, "error_type": type(error).__name__}
+        result = {"ok": False, "error_type": type(error).__name__, "phase": phase}
     finally:
         if model:
             model.shutdown()

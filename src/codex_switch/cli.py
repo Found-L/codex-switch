@@ -23,6 +23,7 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("status", "doctor"):
         commands.add_parser(command).add_argument("--json", action="store_true")
+    commands.add_parser("runtime", help="Read an existing local server's catalog; never start a model turn")
     commands.add_parser("use").add_argument("mode", choices=("api", "account"))
     for mode in ("api", "account"):
         commands.add_parser(mode, help="Shortcut for use " + mode)
@@ -100,6 +101,10 @@ def main(argv=None):
                 SwitchService(home).remove_api()
             return 0
         service = SwitchService(args.codex_home)
+        if args.command == "runtime":
+            from .runtime import inspect_runtime
+            print(json.dumps(inspect_runtime(service.home), ensure_ascii=False, indent=2))
+            return 0
         if args.command == "models":
             if args.model_command == "sync":
                 service.sync_models()

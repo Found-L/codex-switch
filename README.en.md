@@ -91,3 +91,9 @@ python -m venv .venv
 On macOS, use `.venv/bin/python scripts/macos_ci.py` to build and test with an isolated temporary Keychain. Optional Developer ID/notarization credentials are documented in [the macOS guide](docs/macos.md).
 
 Tagging `v*` runs Windows and both native macOS CI tests/builds and publishes installer, portable ZIP and checksums. See [validation](docs/validation.md), [MIT license](LICENSE), and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Configuration versus runtime
+
+Compare states separates the global config file, saved catalog, editable draft and an optional read-only existing-server snapshot. Draft filters are not availability checks. Add the configured model to a draft without writing until Save. Saved catalogs remain visible when switching back to the account.
+
+`codex-switch runtime` attaches only via `codex app-server proxy`, reads model IDs and a loaded-thread count, and terminates its own proxy only. It never launches another app-server or starts a turn. An unavailable control endpoint is unknown, not proof of account/API routing. Even a connected local server does not identify the foreground desktop chat or verify billing. Snapshots carry a timestamp.

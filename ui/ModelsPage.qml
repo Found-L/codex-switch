@@ -20,7 +20,8 @@ Item {
         const id = bridge.state.api_provider + "|" + bridge.state.base_url
         if (force || id !== connectionId || !draftDirty) {
             selectedIds = entries.filter(m => m.enabled && m.category !== "excluded").map(m => m.id)
-            defaultId = selectedIds.indexOf(bridge.state.model) >= 0 ? bridge.state.model : (selectedIds[0] || "")
+            const savedDefault = bridge.state.api_model || bridge.state.model
+            defaultId = selectedIds.indexOf(savedDefault) >= 0 ? savedDefault : (selectedIds[0] || "")
             draftDirty = false
         } else {
             selectedIds = selectedIds.filter(id => entries.some(m => m.id === id && m.category !== "excluded"))
@@ -47,6 +48,12 @@ Item {
         imageInput.checked = detail ? detail.images : false
     }
     function openDetails(id) { detailId = id; loadDetails(); advanced.visible = true }
+    function includeConfigured() {
+        const id = bridge.state.model
+        if (!entries.some(m => m.id === id && m.category !== "excluded")) return
+        if (selectedIds.indexOf(id) < 0) selectedIds = selectedIds.concat([id])
+        defaultId = id; draftDirty = true; search.text = ""; scope = "selected"
+    }
     Component.onCompleted: reconcile(true)
     Connections {
         target: bridge
@@ -56,12 +63,13 @@ Item {
     }
 
     Text { text: t("选择编程模型", "Choose coding models"); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
+    Text { anchors.right: parent.right; y: 7; text: t("状态对照", "Compare states"); color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; onClicked: statePanel.visible = true } }
     Text {
         objectName: "catalogLoadNotice"
         y: 26; width: parent.width; height: 29; wrapMode: Text.WordWrap
         text: bridge.state.catalog_model_mismatch
-            ? t("配置模型 ", "Configured model ") + bridge.state.model + t(" 不在已保存目录中。重新保存，再完全退出并重启 Codex。", " is outside the saved catalog. Save again, then fully quit and restart Codex.")
-            : bridge.state.catalog_configured ? t("目录已写入配置；完全退出并重启 Codex 后加载。", "Catalog saved to config. Fully quit and restart Codex to load it.")
+            ? t("配置模型未在保存目录中；不代表当前会话异常。点「状态对照」查看。", "Configured model is outside the saved catalog. This does not diagnose a running chat. See Compare states.")
+            : bridge.state.catalog_configured ? t("保存目录 ", "Saved catalog: ") + (bridge.state.saved_model_ids || []).length + t(" 个；桌面是否加载请单独检查。", " models. Desktop loading requires a separate check.")
             : t("勾选用于替换模型目录，不代表当前桌面菜单或调用权限。", "Selection replaces the catalog; it does not mirror the live menu or prove API access.")
         color: bridge.state.catalog_model_mismatch ? "#a26016" : host.muted; font.family: bridge.fontFamily; font.pixelSize: 10
     }
@@ -82,7 +90,7 @@ Item {
     Row {
         y: 103; spacing: 6
         Repeater {
-            model: [{id:"candidate",zh:"编程候选",en:"Candidates"},{id:"selected",zh:"目录所选",en:"Selected"},{id:"all",zh:"全部",en:"All"}]
+            model: [{id:"candidate",zh:"编程候选",en:"Candidates"},{id:"selected",zh:"草稿所选",en:"Draft"},{id:"all",zh:"全部",en:"All"}]
             delegate: Rectangle {
                 required property var modelData
                 width: 76; height: 25; radius: 8; color: picker.scope === modelData.id ? "#e8e5fb" : "transparent"
@@ -91,7 +99,7 @@ Item {
             }
         }
     }
-    Text { y: 109; anchors.right: parent.right; text: modelList.count + t(" / ", " / ") + entries.length; color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
+    Text { y: 109; anchors.right: parent.right; text: modelList.count + (picker.scope === "selected" ? t(" / 草稿 ", " / draft ") + picker.selectedIds.length : t(" / 名单 ", " / listed ") + entries.length); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
     Rectangle {
         x: 0; y: 138; width: parent.width; height: parent.height - y - 62
         color: "white"; radius: 13; border.color: "#e2e5ef"; clip: true
@@ -121,7 +129,7 @@ Item {
                     ToolTip.visible: titleHit.containsMouse; ToolTip.text: row.modelData.id
                     MouseArea { id: titleHit; anchors.fill: parent; hoverEnabled: true; onClicked: picker.toggle(row.modelData.id) }
                 }
-                Text { x: 38; y: 31; text: picker.sourceLabel(row.modelData); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
+                Text { x: 38; y: 31; width: parent.width - 125; elide: Text.ElideRight; text: picker.sourceLabel(row.modelData) + (row.modelData.saved_in_catalog ? picker.t(" · 已保存", " · Saved") : "") + (row.modelData.configured_model ? picker.t(" · 配置模型", " · Configured") : ""); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
                 Rectangle {
                     visible: row.selected; x: parent.width - 87; y: 12; width: 49; height: 27; radius: 8
                     color: picker.defaultId === row.modelData.id ? "#ded9fa" : "#f4f3fa"
@@ -138,16 +146,17 @@ Item {
                 }
             }
             Text {
-                anchors.centerIn: parent; width: parent.width - 28; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                anchors.horizontalCenter: parent.horizontalCenter; y: parent.height / 2 - 25; width: parent.width - 28; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
                 visible: modelList.count === 0
-                text: !bridge.state.api_ready ? picker.t("先配置 API 地址和 Key。", "Set up your API URL and key first.") : !picker.entries.length ? picker.t("点击同步，获取当前 API 的模型名单。", "Refresh to discover this API's models.") : picker.t("没有匹配项，可切换「全部」查找别名。", "No matches. Try All to find aliases.")
+                text: !bridge.state.api_ready ? picker.t("先配置 API 地址和 Key。", "Set up your API URL and key first.") : !picker.entries.length ? picker.t("点击同步，获取当前 API 的模型名单。", "Refresh to discover this API's models.") : picker.scope === "selected" ? picker.t("草稿已勾选 ", "Draft selection: ") + picker.selectedIds.length + picker.t(" 个；当前搜索未匹配。", " models; none match this search.") : picker.t("当前筛选无匹配项，不代表 Codex 没有可用模型。", "No filter matches; this does not describe Codex availability.")
                 color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 11
             }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; y: parent.height / 2 + 15; visible: modelList.count === 0 && search.text.length > 0; text: picker.t("清除搜索", "Clear search"); color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; onClicked: search.text = "" } }
         }
     }
     Text {
         y: parent.height - 54; width: parent.width - 80; elide: Text.ElideRight
-        text: selectedIds.length ? t("默认：", "Default: ") + defaultId : t("隐藏明显非编程模型；别名请查看「全部」。", "Non-coding names hidden. Aliases are under All.")
+        text: selectedIds.length ? t("草稿默认：", "Draft default: ") + defaultId : t("草稿尚未选择模型。", "No draft models selected.")
         color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9
     }
     Text {
@@ -160,8 +169,41 @@ Item {
         anchors.bottom: parent.bottom; width: parent.width; height: 38
         enabled: !bridge.busy && picker.selectedIds.length > 0
         onClicked: bridge.applySelection(JSON.stringify(picker.selectedIds), picker.defaultId)
-        contentItem: Text { text: bridge.busy ? picker.t("正在处理…", "Working…") : picker.t("应用所选 ", "Apply ") + picker.selectedIds.length + picker.t(" 个模型", " selected models"); horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: "white"; font.family: bridge.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
+        contentItem: Text { text: bridge.busy ? picker.t("正在处理…", "Working…") : picker.t("保存草稿 ", "Save draft: ") + picker.selectedIds.length + picker.t(" 个模型并切到 API", " models, use API"); horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: "white"; font.family: bridge.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
         background: Rectangle { radius: 11; color: host.accent; opacity: parent.enabled ? 1 : 0.4 }
+    }
+
+    Rectangle {
+        id: statePanel; objectName: "modelStatePanel"; anchors.fill: parent; color: "#f7f8fc"; visible: false; z: 3
+        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: function(event) { event.accepted = true } }
+        Text { text: picker.t("模型状态对照", "Model state comparison"); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
+        Text { anchors.right: parent.right; y: 7; text: picker.t("返回", "Back"); color: host.accent; font.pixelSize: 11; MouseArea { anchors.fill: parent; onClicked: statePanel.visible = false } }
+        Rectangle {
+            y: 43; width: parent.width; height: 70; radius: 11; color: "white"; border.color: "#e2e5ef"
+            Text { x: 12; y: 9; text: picker.t("全局配置 · 非当前会话", "Global config · not a running chat"); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+            Text { x: 12; y: 31; width: parent.width - 130; elide: Text.ElideRight; text: bridge.state.provider + " / " + (bridge.state.model || picker.t("默认模型", "Default model")); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 11 }
+            Text { x: 12; y: 51; text: "config.toml"; color: host.muted; font.pixelSize: 9 }
+            Text { anchors.right: parent.right; anchors.rightMargin: 12; y: 32; text: picker.t("加入草稿", "Add to draft"); color: host.accent; font.pixelSize: 11; visible: picker.entries.some(m => m.id === bridge.state.model && m.category !== "excluded"); MouseArea { anchors.fill: parent; enabled: !bridge.busy; onClicked: picker.includeConfigured() } }
+        }
+        Rectangle {
+            y: 120; width: parent.width; height: 70; radius: 11; color: "white"; border.color: "#e2e5ef"
+            Text { x: 12; y: 9; text: picker.t("已保存目录 · 启动时加载", "Saved catalog · loaded at startup"); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+            Text { x: 12; y: 31; width: parent.width - 24; elide: Text.ElideRight; text: (bridge.state.saved_model_ids || []).join(", ") || picker.t("未使用工具目录", "No managed catalog"); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 11 }
+            Text { x: 12; y: 51; text: bridge.state.catalog_configured ? picker.t("配置已引用，运行中是否加载仍未知", "Referenced in config; runtime loading is unknown") : picker.t("当前配置未启用此目录", "Not enabled in the current configuration"); color: host.muted; font.pixelSize: 9 }
+        }
+        Rectangle {
+            y: 197; width: parent.width; height: 70; radius: 11; color: "#efecfc"
+            Text { x: 12; y: 9; text: picker.t("编辑草稿 · 尚未写入", "Draft · not saved"); color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 10 }
+            Text { x: 12; y: 31; width: parent.width - 24; elide: Text.ElideRight; text: picker.selectedIds.length + picker.t(" 个；默认 ", " models; default ") + picker.defaultId; color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 11 }
+            Text { x: 12; y: 51; text: picker.t("返回列表后保存才会更改配置", "Return to the list and save to change config"); color: host.muted; font.pixelSize: 9 }
+        }
+        Rectangle {
+            y: 274; width: parent.width; height: 78; radius: 11; color: "white"; border.color: "#e2e5ef"
+            Text { x: 12; y: 9; text: picker.t("现有本机进程 · 独立检查", "Existing local server · independent check"); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+            Text { anchors.right: parent.right; anchors.rightMargin: 12; y: 9; text: picker.t("检查", "Check"); color: host.accent; font.pixelSize: 11; MouseArea { anchors.fill: parent; enabled: !bridge.busy; onClicked: bridge.inspectRuntime() } }
+            Text { x: 12; y: 30; width: parent.width - 24; wrapMode: Text.WordWrap; text: bridge.runtimeState.status === "connected" ? picker.t("读到上次进程目录 ", "Last server catalog: ") + bridge.runtimeState.models.length + picker.t(" 个；前台会话模型与计费连接仍未知。", " models; foreground chat model and billing route remain unknown.") : picker.t("当前会话模型 / 计费连接：未知。未接入桌面。", "Current chat model / billing route: unknown. Desktop is not connected."); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 10 }
+            Text { x: 12; y: 61; width: parent.width - 24; elide: Text.ElideRight; text: bridge.runtimeState.checked_at || picker.t("尚未检查；不以配置值推断", "Not checked; never inferred from config"); color: host.muted; font.pixelSize: 9 }
+        }
     }
 
     Rectangle {
