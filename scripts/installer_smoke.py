@@ -56,7 +56,11 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-install-") as temporary:
         assert WindowsCredentials(home).read() == "installer-fixture-not-real"
         command([installed / "unins000.exe", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
         deadline = time.monotonic() + 10
-        while (installed / "unins000.exe").exists() and time.monotonic() < deadline:
+        # Inno's original EXE can disappear before its relocated child finishes
+        # the post-uninstall PATH callback. Wait for the actual final state.
+        while time.monotonic() < deadline:
+            if not cli.exists() and not (installed / "unins000.exe").exists() and user_path() == before_path:
+                break
             time.sleep(0.1)
         config = tomllib.loads((home / "config.toml").read_text("utf-8"))
         assert config["model_provider"] == "openai"

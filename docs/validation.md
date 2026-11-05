@@ -1,4 +1,4 @@
-# v0.1.1 验证记录
+# v0.1.2 验证记录
 
 验证环境：Windows 11 x64，Python 3.14.4，PyInstaller 6.22.3，Inno Setup 7.1.1；Codex CLI 0.166.0-alpha.6。发布范围为 Windows 10/11 x64，Windows 10 尚未独立实机验收。
 
