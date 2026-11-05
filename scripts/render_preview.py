@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-render-") as home:
     from unittest.mock import patch
     service.setup("gateway-fixture", "https://gateway.example/v1")
     entries = [{"id": name, "enabled": False, "context_window": 32768, "reasoning": [], "images": False, "status": "unverified"}
-               for name in ("deepseek-flash", "gpt-6.1-sol", "claude-example")]
+               for name in ("deepseek-flash", "gpt-6.1-sol", "claude-example", "gpt-image-2", "text-embedding-ada-002", "my-custom-alias")]
     with patch("codex_switch.service.discover", return_value=entries):
         service.sync_models()
     bridge.refresh()
@@ -55,6 +55,22 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-render-") as home:
     bridge.openPage.emit("models")
     settle()
     window.grabWindow().save(str(destination / "models.png"))
+    from PySide6.QtCore import Q_ARG, QMetaObject, QObject, Qt
+    picker = window.findChild(QObject, "modelsPage")
+    QMetaObject.invokeMethod(picker, "toggle", Qt.DirectConnection, Q_ARG("QVariant", "gpt-6.1-sol"))
+    QMetaObject.invokeMethod(picker, "toggle", Qt.DirectConnection, Q_ARG("QVariant", "deepseek-flash"))
+    settle()
+    window.grabWindow().save(str(destination / "models-selected.png"))
+    picker.setProperty("scope", "all")
+    window.findChild(QObject, "modelSearch").setProperty("text", "image")
+    settle()
+    window.grabWindow().save(str(destination / "models-excluded.png"))
+    window.findChild(QObject, "modelSearch").setProperty("text", "")
+    picker.setProperty("scope", "candidate")
+    QMetaObject.invokeMethod(picker, "openDetails", Qt.DirectConnection, Q_ARG("QVariant", "deepseek-flash"))
+    settle()
+    window.grabWindow().save(str(destination / "models-advanced.png"))
+    window.findChild(QObject, "advancedModelPanel").setProperty("visible", False)
     from codex_switch.errors import SwitchError
     bridge._set_notice(bridge._safe_error(SwitchError("Cannot read the model list. Check the API address, certificate and network.")), True)
     settle()

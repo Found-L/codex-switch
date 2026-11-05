@@ -43,6 +43,7 @@ def main(argv=None):
     configure.add_argument("--images", action="store_true")
     apply_models = model_commands.add_parser("apply")
     apply_models.add_argument("--default", dest="default_model")
+    apply_models.add_argument("--select", nargs="+", help="Replace the menu selection, keeping automatic capability metadata")
     apply_models.add_argument("--use", action="store_true")
     commands.add_parser("gui", help="Open the desktop application")
     install = commands.add_parser("install-cli", help="macOS: install a user-local terminal command and PATH integration")
@@ -106,9 +107,7 @@ def main(argv=None):
                 service.configure_model(args.model, not args.disable, args.context,
                                         [e.strip() for e in args.reasoning.split(",") if e.strip()], args.images)
             elif args.model_command == "apply":
-                service.apply_models(args.default_model)
-                if args.use:
-                    service.use("api")
+                service.apply_models(args.default_model, selected=args.select, activate=args.use)
                 print("Catalog saved. Reload Codex to refresh its model menu. Compatibility has not been tested.")
             elif args.model_command == "reset":
                 service.reset_models()

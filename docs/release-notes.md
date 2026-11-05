@@ -1,3 +1,13 @@
+## Codex Switch v0.5.0
+
+- 模型页改为有界的搜索、多选列表，支持「编程候选 / 已选择 / 全部」、默认模型和一次应用，移除原来的长下拉框。
+- 明显的音频、绘图、嵌入等非编程模型默认过滤，界面和后端均禁止加入；未知别名保留在「全部」。分类仅为浏览提示，不表示已验证兼容。
+- 官方 OpenAI API 自动尝试读取同一 Key、对应 Codex 版本的官方模型目录，仅精确匹配可见且支持 API 的条目，保留原生指令、工具及参数；绝不把网关 Key 发往 OpenAI。
+- 区分「官方参数 · 未实测」「基础模板 · 未验证」和手动覆盖。普通选择无需填写能力参数；高级参数移至模型行 `···`，支持恢复默认。
+- 增加 CLI `models apply --select 模型1 模型2 --default 模型1 --use`；批量选择失败整体回滚，不提前保存半成品。
+
+Searchable multi-select model picker, non-coding filters, exact authenticated official OpenAI metadata and advanced-only capability overrides. No model inference is performed. Custom gateways use clearly labeled unverified basic templates. Reload Codex after applying.
+
 ## Codex Switch v0.4.1
 
 - 修复已有 `openai_api` 显示连接可用、点击同步却要求重新保存 Key 的问题。指向 OpenAI 官方的旧版连接可直接沿用已有 command/env/token 认证，同步不会复制密钥或重写提供商配置。

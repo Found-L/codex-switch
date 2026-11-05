@@ -10,17 +10,27 @@ import tempfile
 import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from codex_switch.catalog import model_info
+from codex_switch.catalog import model_info, official_metadata, classification
 from codex_switch.settings import atomic_json
 
 executable = shutil.which("codex")
 if not executable:
     raise SystemExit("Codex executable required for catalog acceptance.")
+catalog_models = [model_info("gateway-test-deepseek", 65536, ["low", "high"]), model_info("gateway-test-other", 32768)]
+native = "--official-metadata" in sys.argv
+if native:
+    from codex_switch.service import SwitchService
+    service = SwitchService(track=False)
+    state = service.status()
+    entries, status = official_metadata(state["base_url"], service._discovery_credential(state))
+    listed = {model["id"] for model in state["models"]}
+    catalog_models = [entry for name, entry in entries.items() if name in listed and classification(name) != "excluded"]
+    if status != "available" or not catalog_models:
+        raise SystemExit("Official metadata unavailable for native catalog acceptance.")
 with tempfile.TemporaryDirectory(prefix="switch-catalog-") as temporary:
     home = Path(temporary)
     catalog = home / "catalog.json"
-    atomic_json(catalog, {"models": [model_info("gateway-test-deepseek", 65536, ["low", "high"]),
-                                   model_info("gateway-test-other", 32768)]})
+    atomic_json(catalog, {"models": catalog_models})
     (home / "config.toml").write_text('model_provider="fixture"\nmodel_catalog_json=' + json.dumps(str(catalog)) + '\n[model_providers.fixture]\nname="Test only"\nbase_url="http://127.0.0.1:9/v1"\nwire_api="responses"\n', encoding="utf-8")
     env = dict(os.environ, CODEX_HOME=str(home))
     for name in ("OPENAI_API_KEY", "CODEX_API_KEY"):
@@ -52,11 +62,13 @@ with tempfile.TemporaryDirectory(prefix="switch-catalog-") as temporary:
         send({"id": 2, "method": "model/list", "params": {}})
         result = receive(2)
         models = result["data"]
-        assert {m["model"] for m in models} == {"gateway-test-deepseek", "gateway-test-other"}, "Unexpected models in picker"
-        deepseek = next(m for m in models if m["model"] == "gateway-test-deepseek")
-        assert [v["reasoningEffort"] for v in deepseek["supportedReasoningEfforts"]] == ["low", "high"]
-        assert all(not m.get("additionalSpeedTiers") and not m.get("serviceTiers") for m in models)
-        print("Codex app-server accepted both custom model entries, reasoning levels and empty speed tiers; no inference.")
+        assert {m["model"] for m in models} == {m["slug"] for m in catalog_models}, "Unexpected models in picker"
+        for actual in models:
+            source = next(m for m in catalog_models if m["slug"] == actual["model"])
+            assert [v["reasoningEffort"] for v in actual["supportedReasoningEfforts"]] == [v["effort"] for v in source["supported_reasoning_levels"]]
+        if not native:
+            assert all(not m.get("additionalSpeedTiers") and not m.get("serviceTiers") for m in models)
+        print("Codex app-server accepted " + str(len(models)) + (" official" if native else " custom") + " catalog entries and their reasoning metadata; no inference.")
     finally:
         if os.name == "nt":
             # The Windows launcher owns an app-server child; terminate our whole tree.

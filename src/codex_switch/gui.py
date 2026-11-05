@@ -69,6 +69,8 @@ class Bridge(QObject):
     compactChanged = Signal()
     openPage = Signal(str)
     keySaved = Signal()
+    catalogApplied = Signal()
+    capabilitiesSaved = Signal()
     windowHidden = Signal()
     _completed = Signal(object)
 
@@ -160,6 +162,8 @@ class Bridge(QObject):
             return self.tr_text("操作未完成，请检查连接和本地权限后重试。", "Operation failed. Check the connection and local permissions, then retry.")
         message = str(error)
         translations = {
+            "Audio, image, embedding and other non-coding models cannot be added to the Codex menu.": "音频、图像、嵌入等非编程模型不能加入 Codex 菜单。",
+            "A selected model is no longer in the synchronized list. Refresh and choose again.": "所选模型已不在最新名单中，请同步后重新选择。",
             "Save the API connection in Codex Switch before synchronizing models.": "请先在「API 配置」中保存接口地址和 Key，再同步模型。",
             "Cannot read the existing API key. Repair the credential helper or save a new API connection.": "无法读取已有 API Key，请检查旧版取钥程序，或在「API 配置」中保存连接。",
             "The legacy API authentication is ambiguous. Save a new API connection first.": "旧版 API 同时配置了多种认证方式，请在「API 配置」中重新保存连接。",
@@ -168,7 +172,7 @@ class Bridge(QObject):
             "The API provider changed. Sync and apply the models again.": "API 连接已变化，请重新同步并应用模型目录。",
             "Cannot read the model list. Check the API address, certificate and network.": "无法获取模型名单，请检查 API 地址、证书和网络连接。",
             "No models were returned for this key. Check New API groups and token model limits.": "接口未返回模型，请检查 Key 的分组和模型权限。",
-            "Enable at least one coding model before applying the catalog.": "请先启用并保存至少一个编程模型，再应用目录。",
+            "Enable at least one coding model before applying the catalog.": "请先勾选至少一个编程模型，再应用目录。",
             "Choose an enabled model as the default.": "请先启用并保存当前模型，再将它设为默认模型。",
             "Connection changed during synchronization. Retry.": "同步期间连接发生变化，请重新同步。",
             "The model list or settings changed. Apply the updated catalog before switching to API.": "模型名单或设置有待应用的更改，请先应用目录，再切到 API。",
@@ -238,11 +242,13 @@ class Bridge(QObject):
                 self.openPage.emit("models" if self._state.get("base_url") != "https://api.openai.com/v1" else "connections")
                 self._set_notice(self.tr_text("API 已保存。自定义接口请同步并配置模型。", "API saved. Discover and configure models for custom endpoints."))
         elif result["kind"] == "sync-models":
-            self._set_notice(self.tr_text("已获取模型名单，请配置需要使用的编程模型。", "Models discovered. Configure the coding models you want to use."))
+            self._set_notice(self.tr_text("模型名单已更新，请勾选需要的模型后应用。", "Models refreshed. Select the models you want, then apply."))
         elif result["kind"] == "configure-model":
             self._set_notice(self.tr_text("模型设置已保存，请应用目录。", "Model settings saved. Apply the catalog next."))
+            self.capabilitiesSaved.emit()
         elif result["kind"] == "apply-models":
             self._set_notice(self.tr_text("目录已应用。请重载 Codex 刷新菜单；未进行模型调用验证。", "Catalog applied. Reload Codex to refresh the menu. Inference is untested."))
+            self.catalogApplied.emit()
         elif result["kind"] == "reset-models":
             self._set_notice(self.tr_text("已撤销自定义模型目录，API 配置仍保留。请重载 Codex。", "Custom catalog reset. API connection retained. Reload Codex."))
         elif result["kind"] == "install-cli":
@@ -314,6 +320,17 @@ class Bridge(QObject):
             self.service.apply_models(default_model or None)
             self.service.use("api")
         self._submit(apply, "apply-models")
+
+    @Slot(str, str)
+    def applySelection(self, selection_json, default_model):
+        def apply():
+            selected = json.loads(selection_json)
+            self.service.apply_models(default_model or None, selected=selected, activate=True)
+        self._submit(apply, "apply-models")
+
+    @Slot(str)
+    def resetCapabilities(self, model):
+        self._submit(lambda: self.service.reset_capabilities(model), "configure-model")
 
     @Slot()
     def refresh(self):
@@ -581,7 +598,7 @@ def self_test(report, native=False):
             engine, window = load_scene(model)
             window.show()
             app.processEvents()
-            names = ("connectionsPage", "keyPage", "terminalPage", "modelsPage", "selectionPill", "apiKeyField", "gatewayModelChoice")
+            names = ("connectionsPage", "keyPage", "terminalPage", "modelsPage", "selectionPill", "apiKeyField", "gatewayModelList")
             objects = {name: window.findChild(QObject, name) for name in names}
             if not all(objects.values()):
                 raise RuntimeError("Required persistent controls are missing.")
@@ -592,8 +609,8 @@ def self_test(report, native=False):
             app.processEvents()
             if model.busy or window.property("page") != "key" or "API 地址" not in model.notice:
                 raise RuntimeError("Missing API setup did not show localized navigation guidance.")
-            if window.findChild(QObject, "applyModelButton").property("visible"):
-                raise RuntimeError("Empty model lists must not show apply controls.")
+            if window.findChild(QObject, "applyModelButton").property("enabled"):
+                raise RuntimeError("Empty model lists must not enable apply controls.")
             model.clearNotice()
 
             def wait_idle():
@@ -640,6 +657,8 @@ def self_test(report, native=False):
                 raise RuntimeError("Mini window geometry is incorrect.")
             if "model" in __import__("tomllib").loads(service.config.read().decode()):
                 raise RuntimeError("Setup unexpectedly wrote a model.")
+            model.toggleCompact()
+            app.processEvents()
             # Exercise the actual asynchronous gateway flow without any external request.
             from unittest.mock import patch as mock_patch
             model.saveConnection("gateway-qt-fixture", "https://gateway.example/v1")
@@ -647,26 +666,54 @@ def self_test(report, native=False):
             fixture = [{"id": "gateway-coding-model", "enabled": False, "context_window": 32768,
                         "reasoning": [], "images": False, "status": "unverified"},
                        {"id": "gateway-second-model", "enabled": False, "context_window": 32768,
+                        "reasoning": [], "images": False, "status": "unverified"},
+                       {"id": "gpt-image-1", "enabled": False, "context_window": 32768,
                         "reasoning": [], "images": False, "status": "unverified"}]
             with mock_patch("codex_switch.service.discover", return_value=fixture):
                 model.syncModels()
                 wait_idle()
-            choice = objects["gatewayModelChoice"]
-            choice.setProperty("currentIndex", 1)
-            choice.setProperty("selectedId", "gateway-second-model")
+            reveal = QEventLoop()
+            QTimer.singleShot(350, reveal.quit)
+            reveal.exec()
+            # Interact with the same draft, search and apply controls used by the UI.
+            from PySide6.QtCore import Q_ARG
+            picker = objects["modelsPage"]
+            picker.setProperty("scope", "all")
+            QMetaObject.invokeMethod(picker, "toggle", Qt.DirectConnection, Q_ARG("QVariant", "gateway-coding-model"))
+            QMetaObject.invokeMethod(picker, "toggle", Qt.DirectConnection, Q_ARG("QVariant", "gateway-second-model"))
+            QMetaObject.invokeMethod(picker, "toggle", Qt.DirectConnection, Q_ARG("QVariant", "gpt-image-1"))
+            if len(picker.property("selectedIds").toVariant()) != 2:
+                raise RuntimeError("Non-coding model was selectable.")
+            picker.setProperty("defaultId", "gateway-second-model")
+            search = window.findChild(QObject, "modelSearch")
+            search.setProperty("text", "second-model")
             app.processEvents()
-            window.findChild(QObject, "gatewayEnable").setProperty("checked", True)
+            if objects["gatewayModelList"].property("count") != 1:
+                raise RuntimeError("Model search did not filter the list.")
+            if service.status()["catalog_enabled"] or any(m["enabled"] for m in service.status()["models"]):
+                raise RuntimeError("Draft selection wrote configuration before apply.")
+            search.setProperty("text", "")
+            QMetaObject.invokeMethod(picker, "openDetails", Qt.DirectConnection, Q_ARG("QVariant", "gateway-second-model"))
+            app.processEvents()
+            from PySide6.QtCore import QPoint, QPointF
+            from PySide6.QtTest import QTest
+            point = picker.mapToScene(QPointF(23, 161))
+            QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(int(point.x()), int(point.y())))
+            if len(picker.property("selectedIds").toVariant()) != 2:
+                raise RuntimeError("Advanced settings allowed clicks through to the model list.")
             window.findChild(QObject, "gatewayContextField").setProperty("text", "65536")
             window.findChild(QObject, "gatewayReasoningField").setProperty("text", "low,high")
             QMetaObject.invokeMethod(window.findChild(QObject, "saveModelButton"), "clicked", Qt.DirectConnection)
             wait_idle()
-            app.processEvents()
-            if choice.property("currentText") != "gateway-second-model":
-                raise RuntimeError("Model selection was lost while saving.")
+            window.findChild(QObject, "advancedModelPanel").setProperty("visible", False)
+            if len(picker.property("selectedIds").toVariant()) != 2:
+                raise RuntimeError("Draft selection was lost while saving capabilities.")
             QMetaObject.invokeMethod(window.findChild(QObject, "applyModelButton"), "clicked", Qt.DirectConnection)
             wait_idle()
             if model.state["model"] != "gateway-second-model" or not model.state["catalog_active"]:
                 raise RuntimeError("Gateway catalog was not applied.")
+            if sum(bool(m["enabled"]) for m in model.state["models"]) != 2:
+                raise RuntimeError("Batch model selection was not saved.")
             model._set_notice(model._safe_error(SwitchError("Cannot read the model list. Check the API address, certificate and network.")), True)
             app.processEvents()
             area = window.findChild(QObject, "pagesArea")
@@ -689,7 +736,7 @@ def self_test(report, native=False):
                       "persistent_controls": True, "async_switching": True,
                       "page_transition_no_overlap": True,
                       "native_keychain": native,
-                      "gateway_catalog_flow": True,
+                      "gateway_catalog_flow": True, "search_multi_select": True,
                       "empty_model_guidance": True, "notice_no_overlap": True,
                       "mini_window": True, "single_instance": True, "setup_entry_count": 1}
             model.shutdown()

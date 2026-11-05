@@ -1,0 +1,188 @@
+import QtQuick
+import QtQuick.Controls
+
+Item {
+    id: picker
+    property var host
+    property var selectedIds: []
+    property string defaultId: ""
+    property string scope: "candidate"
+    property string connectionId: ""
+    property bool draftDirty: false
+    property string detailId: ""
+    property var entries: bridge.state.models || []
+    property var detail: entries.find(function(m) { return m.id === detailId }) || null
+    function t(zh, en) { return host.t(zh, en) }
+    function sourceLabel(m) {
+        return m.category === "excluded" ? t("非编程模型", "Not for coding") : m.capability_source === "official" ? t("官方参数 · 未实测", "Official metadata · untested") : m.capability_source === "manual" ? t("手动参数 · 未实测", "Manual metadata · untested") : t("基础模板 · 未验证", "Basic template · unverified")
+    }
+    function reconcile(force) {
+        const id = bridge.state.api_provider + "|" + bridge.state.base_url
+        if (force || id !== connectionId || !draftDirty) {
+            selectedIds = entries.filter(m => m.enabled && m.category !== "excluded").map(m => m.id)
+            defaultId = selectedIds.indexOf(bridge.state.model) >= 0 ? bridge.state.model : (selectedIds[0] || "")
+            draftDirty = false
+        } else {
+            selectedIds = selectedIds.filter(id => entries.some(m => m.id === id && m.category !== "excluded"))
+            if (selectedIds.indexOf(defaultId) < 0) defaultId = selectedIds[0] || ""
+        }
+        connectionId = id
+    }
+    function toggle(id) {
+        const m = entries.find(m => m.id === id)
+        if (!m || m.category === "excluded" || bridge.busy) return
+        selectedIds = selectedIds.indexOf(id) >= 0 ? selectedIds.filter(v => v !== id) : selectedIds.concat([id])
+        if (selectedIds.indexOf(defaultId) < 0) defaultId = selectedIds[0] || ""
+        draftDirty = true
+    }
+    function filtered() {
+        const query = search.text.toLowerCase().trim()
+        return entries.filter(m => (!query || m.id.toLowerCase().indexOf(query) >= 0)
+            && (scope === "all" || (scope === "selected" ? selectedIds.indexOf(m.id) >= 0 : m.category === "candidate")))
+            .sort((a,b) => (a.capability_source === "official" ? -1 : 0) - (b.capability_source === "official" ? -1 : 0) || a.id.localeCompare(b.id))
+    }
+    function loadDetails() {
+        contextInput.text = detail ? String(detail.context_window) : "32768"
+        reasoningInput.text = detail ? detail.reasoning.join(",") : ""
+        imageInput.checked = detail ? detail.images : false
+    }
+    function openDetails(id) { detailId = id; loadDetails(); advanced.visible = true }
+    Component.onCompleted: reconcile(true)
+    Connections {
+        target: bridge
+        function onStateChanged() { picker.reconcile(false) }
+        function onCatalogApplied() { picker.reconcile(true) }
+        function onCapabilitiesSaved() { if (advanced.visible) picker.loadDetails() }
+    }
+
+    Text { text: t("选择编程模型", "Choose coding models"); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
+    Text { y: 27; text: bridge.state.metadata_status === "available" ? t("官方参数已匹配；实际调用尚未验证。", "Official metadata matched; inference is untested.") : (bridge.state.metadata_status || "").indexOf("unavailable") === 0 ? t("未获取官方参数，基础模板需确认能力。", "Official metadata unavailable. Basic templates need review.") : t("目录候选，尚未验证调用；勾选后统一应用。", "Candidates, not proven access. Select, then apply."); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+    TextField {
+        id: search; objectName: "modelSearch"
+        y: 50; width: parent.width - 92; height: 34; leftPadding: 11
+        placeholderText: t("搜索模型名称…", "Search model names…"); selectByMouse: true
+        font.family: bridge.fontFamily; font.pixelSize: 11; color: host.ink
+        background: Rectangle { radius: 10; color: "white"; border.color: search.activeFocus ? host.accent : "#dfe3ee" }
+    }
+    Button {
+        x: parent.width - 82; y: 50; width: 82; height: 34
+        text: bridge.busy ? t("处理中", "Working") : !bridge.state.api_ready ? t("配置 API", "API setup") : t("同步", "Refresh")
+        enabled: !bridge.busy; onClicked: bridge.syncModels()
+        contentItem: Text { text: parent.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold }
+        background: Rectangle { radius: 10; color: parent.down ? "#e2dff9" : "#eceafa" }
+    }
+    Row {
+        y: 94; spacing: 6
+        Repeater {
+            model: [{id:"candidate",zh:"编程候选",en:"Candidates"},{id:"selected",zh:"已选择",en:"Selected"},{id:"all",zh:"全部",en:"All"}]
+            delegate: Rectangle {
+                required property var modelData
+                width: 76; height: 25; radius: 8; color: picker.scope === modelData.id ? "#e8e5fb" : "transparent"
+                Text { anchors.centerIn: parent; text: picker.t(modelData.zh,modelData.en); color: picker.scope === modelData.id ? host.accent : host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+                MouseArea { anchors.fill: parent; onClicked: picker.scope = modelData.id }
+            }
+        }
+    }
+    Text { y: 100; anchors.right: parent.right; text: modelList.count + t(" / ", " / ") + entries.length; color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
+    Rectangle {
+        x: 0; y: 129; width: parent.width; height: parent.height - y - 62
+        color: "white"; radius: 13; border.color: "#e2e5ef"; clip: true
+        ListView {
+            id: modelList; objectName: "gatewayModelList"
+            anchors.fill: parent; anchors.margins: 5
+            model: picker.filtered(); clip: true; boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            delegate: Rectangle {
+                id: row
+                required property var modelData
+                width: modelList.width; height: 54; radius: 9
+                readonly property bool selected: picker.selectedIds.indexOf(modelData.id) >= 0
+                color: selected ? "#f0edfc" : "white"
+                Behavior on color { ColorAnimation { duration: 100 } }
+                CheckBox {
+                    id: check; x: 5; anchors.verticalCenter: parent.verticalCenter; width: 26; height: 32
+                    checked: row.selected; enabled: !bridge.busy && row.modelData.category !== "excluded"
+                    Accessible.name: row.modelData.id
+                    onClicked: picker.toggle(row.modelData.id)
+                    indicator: Rectangle { width: 18; height: 18; radius: 6; anchors.centerIn: parent; color: check.checked ? host.accent : "white"; border.color: check.checked ? host.accent : "#ccd2e1"; Canvas { anchors.centerIn: parent; width: 12; height: 12; visible: check.checked; onPaint: { const c=getContext("2d"); c.strokeStyle="white"; c.lineWidth=1.5; c.lineCap="round"; c.beginPath(); c.moveTo(2,6); c.lineTo(5,9); c.lineTo(10,3); c.stroke() } } }
+                }
+                Text {
+                    x: 38; y: 10; width: parent.width - 132; text: row.modelData.id; elide: Text.ElideRight
+                    color: row.modelData.category === "excluded" ? "#a4a7b2" : host.ink
+                    font.family: bridge.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold
+                    ToolTip.visible: titleHit.containsMouse; ToolTip.text: row.modelData.id
+                    MouseArea { id: titleHit; anchors.fill: parent; hoverEnabled: true; onClicked: picker.toggle(row.modelData.id) }
+                }
+                Text { x: 38; y: 31; text: picker.sourceLabel(row.modelData); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9 }
+                Rectangle {
+                    visible: row.selected; x: parent.width - 87; y: 12; width: 49; height: 27; radius: 8
+                    color: picker.defaultId === row.modelData.id ? "#ded9fa" : "#f4f3fa"
+                    Text { anchors.centerIn: parent; text: picker.defaultId === row.modelData.id ? picker.t("默认", "Default") : picker.t("设默认", "Set default"); color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 9 }
+                    MouseArea { anchors.fill: parent; enabled: !bridge.busy; onClicked: { picker.defaultId = row.modelData.id; picker.draftDirty = true } }
+                }
+                ToolButton {
+                    x: parent.width - 34; y: 11; width: 30; height: 30; text: "···"
+                    enabled: !bridge.busy && row.modelData.category !== "excluded"
+                    onClicked: picker.openDetails(row.modelData.id)
+                    contentItem: Text { text: parent.text; color: host.muted; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 17 }
+                    background: Rectangle { radius: 8; color: parent.hovered ? "#eceafa" : "transparent" }
+                    ToolTip.visible: hovered; ToolTip.text: picker.t("高级参数", "Advanced parameters")
+                }
+            }
+            Text {
+                anchors.centerIn: parent; width: parent.width - 28; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                visible: modelList.count === 0
+                text: !bridge.state.api_ready ? picker.t("先配置 API 地址和 Key。", "Set up your API URL and key first.") : !picker.entries.length ? picker.t("点击同步，获取当前 API 的模型名单。", "Refresh to discover this API's models.") : picker.t("没有匹配项，可切换「全部」查找别名。", "No matches. Try All to find aliases.")
+                color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 11
+            }
+        }
+    }
+    Text {
+        y: parent.height - 54; width: parent.width - 80; elide: Text.ElideRight
+        text: selectedIds.length ? t("默认：", "Default: ") + defaultId : t("隐藏明显非编程模型；别名请查看「全部」。", "Non-coding names hidden. Aliases are under All.")
+        color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 9
+    }
+    Text {
+        visible: bridge.state.catalog_enabled; y: parent.height - 54; anchors.right: parent.right
+        text: t("撤销目录", "Reset catalog"); color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 9
+        MouseArea { anchors.fill: parent; enabled: !bridge.busy; onClicked: bridge.resetModels() }
+    }
+    Button {
+        objectName: "applyModelButton"
+        anchors.bottom: parent.bottom; width: parent.width; height: 38
+        enabled: !bridge.busy && picker.selectedIds.length > 0
+        onClicked: bridge.applySelection(JSON.stringify(picker.selectedIds), picker.defaultId)
+        contentItem: Text { text: bridge.busy ? picker.t("正在处理…", "Working…") : picker.t("应用所选 ", "Apply ") + picker.selectedIds.length + picker.t(" 个模型", " selected models"); horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: "white"; font.family: bridge.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold }
+        background: Rectangle { radius: 11; color: host.accent; opacity: parent.enabled ? 1 : 0.4 }
+    }
+
+    Rectangle {
+        id: advanced; objectName: "advancedModelPanel"
+        anchors.fill: parent; visible: false; color: "#f7f8fc"; z: 4
+        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: function(event) { event.accepted = true } }
+        Text { text: picker.t("高级参数", "Advanced parameters"); color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
+        Text { anchors.right: parent.right; y: 7; text: picker.t("返回列表", "Back to list"); color: host.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; onClicked: advanced.visible = false } }
+        Text { y: 34; width: parent.width; elide: Text.ElideRight; text: picker.detailId; color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 12 }
+        Text { y: 56; text: picker.detail ? picker.sourceLabel(picker.detail) : ""; color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+        Text { y: 83; text: picker.t("上下文 tokens（客户端预算，不会扩大模型上限）", "Context tokens (client budget, not model capacity)"); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+        TextField { id: contextInput; objectName: "gatewayContextField"; y: 103; width: parent.width; height: 34; selectByMouse: true; enabled: !bridge.busy; color: host.ink; font.pixelSize: 12; background: Rectangle { radius: 9; color: "white"; border.color: "#dfe3ee" } }
+        Text { y: 149; text: picker.t("推理档位（逗号分隔；未知则留空）", "Reasoning levels (comma separated; blank if unknown)"); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+        TextField { id: reasoningInput; objectName: "gatewayReasoningField"; y: 169; width: parent.width; height: 34; selectByMouse: true; enabled: !bridge.busy; color: host.ink; font.pixelSize: 12; background: Rectangle { radius: 9; color: "white"; border.color: "#dfe3ee" } }
+        CheckBox {
+            id: imageInput; y: 213; height: 30; text: picker.t("接口确实支持图片输入", "The route supports image input"); enabled: !bridge.busy
+            indicator: Rectangle { width: 18; height: 18; radius: 6; anchors.verticalCenter: parent.verticalCenter; color: imageInput.checked ? host.accent : "white"; border.color: imageInput.checked ? host.accent : "#ccd2e1"; Canvas { anchors.centerIn: parent; width: 12; height: 12; visible: imageInput.checked; onPaint: { const c=getContext("2d"); c.strokeStyle="white"; c.lineWidth=1.5; c.beginPath(); c.moveTo(2,6); c.lineTo(5,9); c.lineTo(10,3); c.stroke() } } }
+            contentItem: Text { text: imageInput.text; leftPadding: 27; verticalAlignment: Text.AlignVCenter; color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 11 }
+        }
+        Text { y: 253; width: parent.width; wrapMode: Text.WordWrap; text: picker.t("仅在确认渠道能力后覆盖。基础模板的 32K / 仅文本是保守设置，并非检测结果。", "Override only confirmed capabilities. Basic 32K/text-only settings are a template, not detection."); color: host.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
+        Button {
+            anchors.bottom: parent.bottom; width: parent.width * 0.38; height: 38; text: picker.t("恢复默认", "Restore defaults"); enabled: !bridge.busy; onClicked: bridge.resetCapabilities(picker.detailId)
+            contentItem: Text { text: parent.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: host.ink; font.family: bridge.fontFamily; font.pixelSize: 11 }
+            background: Rectangle { radius: 10; color: "#eaeaf3" }
+        }
+        Button {
+            objectName: "saveModelButton"; anchors.bottom: parent.bottom; anchors.right: parent.right; width: parent.width * 0.59; height: 38; text: picker.t("保存手动覆盖", "Save override"); enabled: !bridge.busy && picker.detail !== null; onClicked: bridge.configureModel(picker.detailId, picker.detail.enabled, contextInput.text, reasoningInput.text, imageInput.checked)
+            contentItem: Text { text: parent.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: "white"; font.family: bridge.fontFamily; font.pixelSize: 11 }
+            background: Rectangle { radius: 10; color: host.accent; opacity: parent.enabled ? 1 : 0.4 }
+        }
+    }
+}

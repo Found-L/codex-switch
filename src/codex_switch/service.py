@@ -8,7 +8,7 @@ import subprocess
 from .config import API_URL, LEGACY, PROVIDER, ConfigFile, default_home, lock, parse, patch
 from .credentials import default_credentials, HelperCredentials
 from .errors import SwitchError
-from .catalog import endpoint, discover, merge_discovery, make_catalog, model_info
+from .catalog import endpoint, discover, merge_discovery, make_catalog, model_info, classification, official_metadata, enrich_models
 from .settings import MODEL_KEYS, read_state, write_state, atomic_json
 import hashlib
 from copy import deepcopy
@@ -105,7 +105,11 @@ class SwitchService:
             "profile_override": override, "model_requests": 0,
             "base_url": connection.get("base_url", API_URL),
             "api_label": "OpenAI API" if connection.get("base_url", API_URL) == API_URL else "Custom API",
-            "models": connection.get("models", []),
+            "models": [{**{k: v for k, v in m.items() if k != "official_entry"},
+                        "category": m.get("category", classification(m["id"])),
+                        "capability_source": "manual" if m.get("manual_capabilities") else "official" if m.get("official_entry") else "basic"}
+                       for m in connection.get("models", [])],
+            "metadata_status": connection.get("metadata_status", "not_requested"),
             "catalog_enabled": bool(connection.get("catalog")),
             "catalog_dirty": bool(connection.get("catalog_dirty")),
             "catalog_active": config.get("model_catalog_json") == connection.get("catalog") and bool(connection.get("catalog")),
@@ -224,7 +228,7 @@ class SwitchService:
                 self._model_settings(expected, connection, "account")
                 if url != API_URL and expected.get("model_provider") == PROVIDER:
                     expected["model_provider"] = "openai"
-                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider"):
+                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
                     connection.pop(name, None)
             connection["base_url"] = url
             providers = expected.setdefault("model_providers", {})
@@ -284,10 +288,12 @@ class SwitchService:
                 raise SwitchError("Save the API connection in Codex Switch before synchronizing models.")
             key = self._discovery_credential(state)
         fresh = discover(state["base_url"], key)
+        metadata, metadata_status = official_metadata(state["base_url"], key)
         with lock(self.home):
             if self.config.read() != original or self._discovery_credential(self.status()) != key or read_state(self.home) != connection:
                 raise SwitchError("Connection changed during synchronization. Retry.")
-            connection["models"] = merge_discovery(fresh, connection.get("models", []))
+            connection["models"] = enrich_models(merge_discovery(fresh, connection.get("models", [])), metadata)
+            connection["metadata_status"] = metadata_status
             connection["catalog_dirty"] = True
             connection["models_provider"] = state["api_provider"]
             if self.track:
@@ -334,7 +340,7 @@ class SwitchService:
             self._model_settings(expected, connection, "account")
             if expected.get("model_provider") == PROVIDER and connection.get("base_url", API_URL) != API_URL:
                 expected["model_provider"] = "openai"
-            for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider"):
+            for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
                 connection.pop(name, None)
             def change(doc):
                 for name in (*MODEL_KEYS, "model_provider"):
@@ -355,12 +361,15 @@ class SwitchService:
             match = next((m for m in connection.get("models", []) if m["id"] == model), None)
             if match is None:
                 raise SwitchError("Model is not in the latest synchronized list.")
+            if enabled and match.get("category", classification(model)) == "excluded":
+                raise SwitchError("Audio, image, embedding and other non-coding models cannot be added to the Codex menu.")
             match.update(enabled=bool(enabled), context_window=context_window, reasoning=list(reasoning), images=bool(images))
+            match["manual_capabilities"] = True
             connection["catalog_dirty"] = True
             write_state(self.home, connection)
         return self.status()
 
-    def apply_models(self, default_model=None):
+    def apply_models(self, default_model=None, selected=None, activate=False):
         with lock(self.home):
             state = self.status()
             if not state["api_ready"] or state["mode"] == "other" or state["profile_override"]:
@@ -373,6 +382,12 @@ class SwitchService:
             connection = read_state(self.home)
             if connection.get("models_provider", PROVIDER) != state["api_provider"]:
                 raise SwitchError("The API provider changed. Sync and apply the models again.")
+            if selected is not None:
+                available = {m["id"]: m for m in connection.get("models", [])}
+                if not isinstance(selected, list) or any(not isinstance(m, str) or m not in available for m in selected):
+                    raise SwitchError("A selected model is no longer in the synchronized list. Refresh and choose again.")
+                for model in available.values():
+                    model["enabled"] = model["id"] in selected
             catalog = make_catalog(connection.get("models", []))
             if default_model and default_model not in [m["slug"] for m in catalog["models"]]:
                 raise SwitchError("Choose an enabled model as the default.")
@@ -384,14 +399,15 @@ class SwitchService:
             connection["catalog_dirty"] = False
             if default_model:
                 connection["api_model"] = default_model
-            if state["mode"] == "api":
+            if state["mode"] == "api" or activate:
                 # _model_settings remembers the previous API choice when restoring.
                 self._model_settings(expected, connection, "account")
                 if default_model:
                     connection["api_model"] = default_model
                 self._model_settings(expected, connection, "api")
+                expected["model_provider"] = state["api_provider"]
             def change(doc):
-                for name in MODEL_KEYS:
+                for name in (*MODEL_KEYS, "model_provider"):
                     if name in expected:
                         doc[name] = expected[name]
                     else:
@@ -400,6 +416,19 @@ class SwitchService:
             if parse(updated) != expected:
                 raise SwitchError("Unrelated settings changed; catalog was not applied.")
             self._commit(original, updated, connection)
+        return self.status()
+
+    def reset_capabilities(self, model):
+        with lock(self.home):
+            connection = read_state(self.home)
+            match = next((m for m in connection.get("models", []) if m["id"] == model), None)
+            if match is None:
+                raise SwitchError("Model is not in the latest synchronized list.")
+            match.pop("manual_capabilities", None)
+            match.update(context_window=32768, reasoning=[], images=False)
+            enrich_models([match], {model: match["official_entry"]} if match.get("official_entry") else {})
+            connection["catalog_dirty"] = True
+            write_state(self.home, connection)
         return self.status()
 
     def remove_api(self):
@@ -437,7 +466,7 @@ class SwitchService:
                 updated = patch(original, change)
                 if parse(updated) != expected:
                     raise SwitchError("Cannot safely remove the managed provider.")
-                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider"):
+                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
                     connection.pop(name, None)
                 self._commit(original, updated, connection)
             self.credentials.delete()

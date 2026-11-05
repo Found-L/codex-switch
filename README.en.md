@@ -29,17 +29,20 @@ Screenshots are offscreen renders of the actual QML interface with isolated fixt
 
 ## Gateway models
 
-One New API URL and token can route multiple suppliers by model ID. Discovery calls `GET {base_url}/models` only. New entries start disabled; list presence is not proven inference compatibility. Generic templates default to 32K context, text only and no reasoning levels; set actual route capabilities before applying. Fast/Ultrafast/Ultra are disabled in generated catalogs. Reload Codex after catalog changes. Account model settings are restored when switching back.
+One New API URL and token can route multiple suppliers by model ID. Search, select multiple coding candidates, choose a default and apply once. Obvious audio/image/embedding models are hidden by default and blocked from generated menus. Unknown aliases remain under All. Draft checkboxes do not write config.
+
+Discovery reads the model list without inference. For the official OpenAI endpoint only, it also attempts an authenticated, client-version-matched Codex catalog lookup, intersecting exact visible API-supported IDs with the public list and preserving official instructions and settings. Gateway keys are never sent to OpenAI. Labels distinguish official metadata from unverified basic templates; neither proves inference access. Manual overrides are under each row's advanced menu and can be reset. Reload Codex after applying; account settings restore when switching back.
 
 ```text
 codex-switch setup --base-url https://your-gateway/v1
 codex-switch models sync
+codex-switch models apply --select model-one model-two --default model-one --use
 codex-switch models configure your-model-id --context 32768
 codex-switch models apply --default your-model-id --use
 codex-switch models reset
 ```
 
-Changing the endpoint requires re-entering its key. Key rotation invalidates the old model list/catalog. Discovery refuses redirects, validates HTTPS certificates and limits responses to 1 MiB. Plain HTTP is allowed only for loopback. No inference validation or automatic capability detection is performed. Full upstream Codex catalog import is not included. See the [detailed gateway guide (Chinese)](docs/gateways.md).
+Changing the endpoint requires re-entering its key. Key rotation invalidates the old model list/catalog. Discovery refuses redirects, validates HTTPS certificates and limits responses to 1 MiB. Plain HTTP is allowed only for loopback. Basic templates default to 32K/text-only/no reasoning or speed tiers; these are configuration values, not detected capabilities. Full custom gateway catalog import and inference validation are not included. See the [detailed gateway guide (Chinese)](docs/gateways.md).
 
 ## Terminal
 

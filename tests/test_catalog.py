@@ -2,6 +2,7 @@ import json
 import hashlib
 import os
 import subprocess
+import io
 from types import SimpleNamespace
 from pathlib import Path
 import sys
@@ -12,15 +13,61 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import test_service
-from codex_switch.catalog import discover, endpoint
+from codex_switch.catalog import discover, endpoint, classification, enrich_models, make_catalog, model_info, official_metadata, merge_discovery
 from codex_switch.config import API_URL, PROVIDER, parse
 from codex_switch.errors import SwitchError
 from codex_switch.settings import read_state, write_state
 
 
 class GatewayTests(unittest.TestCase):
-    setUp = test_service.ServiceTests.setUp
+    def setUp(self):
+        test_service.ServiceTests.setUp(self)
+        metadata = patch("codex_switch.service.official_metadata", return_value=({}, "unavailable"))
+        metadata.start()
+        self.addCleanup(metadata.stop)
     write_config = test_service.ServiceTests.write_config
+
+    def test_batch_selection_preserves_native_metadata_and_rolls_back_invalid_selection(self):
+        self.service.setup("fixture")
+        values = [{"id": name, "enabled": False, "context_window": 32768, "reasoning": [], "images": False, "status": "unverified"}
+                  for name in ("gpt-test", "deepseek-test", "gpt-image-1")]
+        native = model_info("gpt-test", 200000, ["low", "high"], True)
+        native["base_instructions"] = "Native instructions retained"
+        native["model_messages"]["instructions_template"] = "Native instructions retained"
+        native["service_tiers"] = [{"id": "priority", "name": "Fast", "description": "Native tier"}]
+        with patch("codex_switch.service.discover", return_value=values), patch("codex_switch.service.official_metadata", return_value=({"gpt-test": native}, "available")):
+            self.service.sync_models()
+        self.service.apply_models("gpt-test", selected=["gpt-test", "deepseek-test"])
+        self.service.use("api")
+        catalog = json.loads(Path(parse(self.service.config.read())["model_catalog_json"]).read_text("utf-8"))
+        self.assertEqual(catalog["models"][0]["context_window"], 200000)
+        self.assertEqual(catalog["models"][0]["base_instructions"], "Native instructions retained")
+        self.assertEqual(catalog["models"][0]["service_tiers"], native["service_tiers"])
+        self.assertEqual(self.service.status()["models"][1]["category"], "other")
+        self.assertNotIn("official_entry", self.service.status()["models"][0])
+        before = read_state(self.home), self.service.config.read()
+        with self.assertRaises(SwitchError): self.service.apply_models("gpt-image-1", selected=["gpt-image-1"])
+        self.assertEqual((read_state(self.home), self.service.config.read()), before)
+        with self.assertRaises(SwitchError): self.service.apply_models("missing", selected=["missing"])
+        self.assertEqual((read_state(self.home), self.service.config.read()), before)
+        self.service.configure_model("gpt-test", True, 65536, [])
+        self.service.apply_models("gpt-test")
+        overridden = json.loads(Path(parse(self.service.config.read())["model_catalog_json"]).read_text("utf-8"))["models"][0]
+        self.assertEqual(overridden["base_instructions"], "Native instructions retained")
+        self.assertEqual(overridden["context_window"], 65536)
+        self.service.reset_capabilities("gpt-test")
+        restored = next(m for m in self.service.status()["models"] if m["id"] == "gpt-test")
+        self.assertEqual(restored["context_window"], 200000)
+        self.assertEqual(restored["capability_source"], "official")
+
+    def test_batch_selection_rollback_does_not_partially_save_checkboxes(self):
+        self.service.setup("fixture")
+        values = [{"id": "deepseek-test", "enabled": False, "context_window": 32768, "reasoning": [], "images": False, "status": "unverified"}]
+        with patch("codex_switch.service.discover", return_value=values): self.service.sync_models()
+        before = read_state(self.home), self.service.config.read()
+        with patch.object(self.service.config, "commit", side_effect=OSError()):
+            with self.assertRaises(OSError): self.service.apply_models("deepseek-test", selected=["deepseek-test"], activate=True)
+        self.assertEqual((read_state(self.home), self.service.config.read()), before)
 
     def test_existing_legacy_api_sync_apply_and_cleanup_keep_external_credentials(self):
         raw = b'model_provider="openai_api"\nmodel="original-model"\nservice_tier="priority"\n[model_providers.openai_api]\nbase_url="https://api.openai.com/v1"\nwire_api="responses"\nenv_key="SWITCH_TEST_LEGACY_KEY"\n'
@@ -32,8 +79,9 @@ class GatewayTests(unittest.TestCase):
                 discovery.assert_called_once_with(API_URL, "legacy-test-secret")
             self.assertEqual(self.service.config.read(), raw)
             self.assertIsNone(self.credentials.read())
+            self.service.use("account")
             self.service.configure_model("model-a", True)
-            self.service.apply_models("model-a")
+            self.service.apply_models("model-a", activate=True)
             self.assertEqual(self.service.status()["provider"], "openai_api")
             self.assertTrue(self.service.status()["catalog_active"])
             self.service.use("account")
@@ -218,6 +266,41 @@ class GatewayTests(unittest.TestCase):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_authoritative_metadata_uses_client_version_and_keeps_exact_entries(self):
+        entry = model_info("gpt-native", 200000, ["low", "high"], True)
+        reply = io.BytesIO(json.dumps({"models": [entry]}).encode())
+        with patch("codex_switch.catalog.shutil.which", return_value="codex-fixture"), patch("codex_switch.catalog.subprocess.run", return_value=SimpleNamespace(stdout=b"codex-cli 0.166.0-alpha.6")), patch("codex_switch.catalog.build_opener") as opener:
+            opener.return_value.open.return_value = reply
+            entries, status = official_metadata(API_URL, "authority-key")
+            self.assertEqual(status, "available")
+            self.assertEqual(entries["gpt-native"], entry)
+            request = opener.return_value.open.call_args.args[0]
+            self.assertEqual(request.full_url, "https://chatgpt.com/backend-api/codex/models?client_version=0.166.0")
+            self.assertEqual(request.get_header("Authorization"), "Bearer authority-key")
+
+    def test_metadata_refresh_preserves_manual_values_and_does_not_promote_audio(self):
+        fresh = [{"id": "gpt-native", "enabled": False, "context_window": 32768, "reasoning": [], "images": False, "status": "unverified"}]
+        native = model_info("gpt-native", 200000, ["high"], True)
+        current = enrich_models(fresh, {"gpt-native": native})
+        refreshed = enrich_models(merge_discovery(fresh, current), {"gpt-native": native})
+        self.assertFalse(refreshed[0].get("manual_capabilities", False))
+        refreshed[0].update(context_window=65536, manual_capabilities=True)
+        self.assertEqual(enrich_models(refreshed, {"gpt-native": native})[0]["context_window"], 65536)
+        audio = [{**fresh[0], "id": "gpt-audio-1.5", "enabled": True}]
+        result = enrich_models(audio, {"gpt-audio-1.5": model_info("gpt-audio-1.5", 32768)})
+        self.assertEqual(result[0]["category"], "excluded")
+        self.assertFalse(result[0]["enabled"])
+
+    def test_classification_is_not_a_compatibility_claim_and_gateway_keys_stay_on_gateway(self):
+        for name in ("gpt-audio-1.5", "gpt-image-2", "text-embedding-ada-002", "gpt-realtime-translate", "gpt-4o-mini-tts"):
+            self.assertEqual(classification(name), "excluded")
+        for name in ("gpt-6.1-sol", "deepseek-flash", "claude-example", "namespace/qwen-coder"):
+            self.assertEqual(classification(name), "candidate")
+        self.assertEqual(classification("my-private-alias"), "other")
+        with patch("codex_switch.catalog.build_opener") as opener:
+            self.assertEqual(official_metadata("https://gateway.example/v1", "gateway-secret"), ({}, "not_applicable"))
+            opener.assert_not_called()
+
     def test_get_auth_list_and_redirect_never_forward_key(self):
         requests = []
         class Handler(BaseHTTPRequestHandler):

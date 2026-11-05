@@ -5,14 +5,98 @@ Catalog wire baseline: openai/codex rust-v0.162.1 ModelsResponse.
 """
 from copy import deepcopy
 import json
+import re
+import shutil
+import subprocess
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import URLError, HTTPError
 
 from .errors import SwitchError
+from .config import API_URL
 
 MAX_BYTES = 1024 * 1024
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def classification(model):
+    """Name hints for browsing, not detection of server capabilities."""
+    name = model.lower()
+    if re.search(r"(^|[-_/.])(audio|tts|realtime|transcribe|transcription|translate|whisper|embedding|embeddings|moderation|moderations|image|images|dall-e|sora|rerank|reranker)([-_/.]|$)", name):
+        return "excluded"
+    if re.search(r"(^|[/_-])(gpt-[456]|o[134](?:[-/]|$)|chat-latest|chatgpt|codex|claude|deepseek|qwen|glm|kimi|codestral|devstral|code|coding|minimax|gemini)", name):
+        return "candidate"
+    return "other"
+
+
+def official_metadata(base_url, key):
+    """Optional authoritative catalog. Never disclose gateway keys to OpenAI."""
+    if base_url != API_URL:
+        return {}, "not_applicable"
+    executable = shutil.which("codex")
+    if not executable:
+        return {}, "client_not_found"
+    try:
+        import os
+        version = subprocess.run([executable, "--version"], capture_output=True, timeout=4,
+                                 **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
+        match = re.search(rb"codex-cli (\d+\.\d+\.\d+)", version.stdout)
+        if not match:
+            return {}, "client_not_found"
+        url = "https://chatgpt.com/backend-api/codex/models?client_version=" + match[1].decode()
+        request = Request(url, headers={"Authorization": "Bearer " + key, "Accept": "application/json"})
+        with build_opener(NoRedirect).open(request, timeout=12) as response:
+            raw = response.read(MAX_BYTES + 1)
+        if len(raw) > MAX_BYTES or key.encode("utf-8") in raw:
+            return {}, "unavailable"
+        data = json.loads(raw)
+        entries = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(entries, list):
+            return {}, "unavailable"
+        result = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("slug"), str) or not entry.get("supported_in_api") or entry.get("visibility") != "list":
+                continue
+            messages = entry.get("model_messages") or {}
+            levels = entry.get("supported_reasoning_levels")
+            if (not isinstance(entry.get("supported_reasoning_levels"), list)
+                    or not isinstance(entry.get("truncation_policy"), dict)
+                    or any(not isinstance(r, dict) or r.get("effort") not in EFFORTS for r in levels)
+                    or not all(k in entry for k in ("display_name", "shell_type", "priority", "support_verbosity", "experimental_supported_tools"))
+                    or not (isinstance(entry.get("base_instructions"), str)
+                            or isinstance(messages, dict) and isinstance(messages.get("instructions_template"), str))):
+                continue
+            result[entry["slug"]] = entry
+        return result, "available" if result else "unavailable"
+    except HTTPError as error:
+        status = "unavailable_http_" + str(error.code)
+        error.close()
+        return {}, status
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
+        return {}, "unavailable"
+
+
+def enrich_models(models, entries):
+    for model in models:
+        entry = entries.get(model["id"])
+        model["category"] = classification(model["id"])
+        # Exact official ID only. Aliases and gateway entries keep basic metadata.
+        if entry and model["category"] != "excluded":
+            model["official_entry"] = deepcopy(entry)
+            if not model.get("manual_capabilities"):
+                model["context_window"] = entry.get("context_window") or 32768
+                model["reasoning"] = [r["effort"] for r in entry["supported_reasoning_levels"]]
+                model["images"] = "image" in entry.get("input_modalities", [])
+            model["category"] = "candidate"
+        else:
+            if model.get("official_entry") and not model.get("manual_capabilities"):
+                model.update(context_window=32768, reasoning=[], images=False)
+            model.pop("official_entry", None)
+            if entries and model["category"] != "excluded":
+                model["category"] = "other"
+        if model["category"] == "excluded":
+            model["enabled"] = False
+    return models
 
 
 def endpoint(value):
@@ -89,7 +173,24 @@ def model_info(model, context_window, reasoning=(), images=False):
 
 
 def make_catalog(candidates):
-    models = [model_info(m["id"], m["context_window"], m["reasoning"], m["images"]) for m in candidates if m["enabled"]]
+    models = []
+    for model in candidates:
+        if not model["enabled"]:
+            continue
+        if classification(model["id"]) == "excluded" or model.get("category") == "excluded":
+            raise SwitchError("Audio, image, embedding and other non-coding models cannot be added to the Codex menu.")
+        if model.get("official_entry"):
+            entry = deepcopy(model["official_entry"])
+            entry.update(visibility="list", upgrade=None)
+            if model.get("manual_capabilities"):
+                override = model_info(model["id"], model["context_window"], model["reasoning"], model["images"])
+                for field in ("context_window", "supported_reasoning_levels", "input_modalities"):
+                    entry[field] = override[field]
+                if entry.get("default_reasoning_level") not in model["reasoning"]:
+                    entry["default_reasoning_level"] = override["default_reasoning_level"]
+        else:
+            entry = model_info(model["id"], model["context_window"], model["reasoning"], model["images"])
+        models.append(entry)
     if not models:
         raise SwitchError("Enable at least one coding model before applying the catalog.")
     return {"models": models}
@@ -97,4 +198,8 @@ def make_catalog(candidates):
 
 def merge_discovery(fresh, previous):
     old = {m["id"]: m for m in previous}
-    return [deepcopy(old.get(m["id"], m)) for m in fresh]
+    result = [deepcopy(old.get(m["id"], m)) for m in fresh]
+    for model in result:
+        if "manual_capabilities" not in model and not model.get("official_entry") and (model.get("context_window", 32768) != 32768 or model.get("reasoning") or model.get("images")):
+            model["manual_capabilities"] = True
+    return result

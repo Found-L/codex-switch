@@ -15,7 +15,6 @@ Window {
     property string displayedPage: ""
     property bool sceneReady: false
     property bool showKey: false
-    property bool showAdvanced: false
     readonly property color accent: "#6055da"
     readonly property color ink: "#252938"
     readonly property color muted: "#858998"
@@ -82,21 +81,6 @@ Window {
             }
         }
         MouseArea { id: hit; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: control.clicked() }
-    }
-
-    component CatalogField: TextField {
-        leftPadding: 12; color: root.ink; font.family: bridge.fontFamily
-        background: Rectangle { radius: 9; color: "white"; border.color: parent.activeFocus ? root.accent : "#dfe3ee" }
-    }
-    component CatalogCheck: CheckBox {
-        id: checkControl
-        leftPadding: 0; spacing: 9; height: 30
-        indicator: Rectangle {
-            x: 0; anchors.verticalCenter: parent.verticalCenter; width: 19; height: 19; radius: 6
-            color: checkControl.checked ? root.accent : "white"; border.color: checkControl.checked ? root.accent : "#cdd2e1"
-            Text { anchors.centerIn: parent; text: "✓"; visible: checkControl.checked; color: "white"; font.family: bridge.fontFamily; font.pixelSize: 13 }
-        }
-        contentItem: Text { text: checkControl.text; leftPadding: 28; verticalAlignment: Text.AlignVCenter; color: root.ink; font: checkControl.font }
     }
 
     component GlyphButton: Rectangle {
@@ -310,87 +294,12 @@ Window {
                 Text { visible: false; y: 355; text: root.t("还没有 Codex？查看安装说明 ↗", "Need Codex? Open the installation guide ↗"); color: "#9a9fac"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("codex") } }
             }
 
-            Item {
+            ModelsPage {
                 id: modelsPage
                 objectName: "modelsPage"
+                host: root
                 anchors.fill: parent
                 visible: root.displayedPage === "models"
-                ScrollView {
-                    anchors.fill: parent
-                    anchors.bottomMargin: modelChoice.count > 0 ? 104 : 0
-                    clip: true
-                    contentWidth: availableWidth
-                    Column {
-                        width: parent.width; spacing: 10
-                        Text { text: root.t("网关模型目录", "Gateway model catalog"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
-                        Text { width: parent.width; wrapMode: Text.WordWrap; text: root.t("同步只获取名单，不调用模型。请仅启用支持 Responses 和工具调用的编程模型。", "Discovery lists models without inference. Enable only coding models supporting Responses and tool calls."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11 }
-                        SoftButton { width: parent.width; height: 36; text: bridge.busy ? root.t("处理中…", "Working…") : !bridge.state.api_ready ? root.t("先配置 API 连接", "Set up API connection") : root.t("从 API 同步模型", "Discover API models"); enabled: !bridge.busy; onClicked: bridge.syncModels() }
-                        Text { width: parent.width; wrapMode: Text.WordWrap; text: root.t("已列出 ", "Listed: ") + (bridge.state.models || []).length + root.t(" 个 · 兼容性未验证", " · compatibility untested") + (bridge.state.catalog_dirty ? root.t(" · 待应用", " · unapplied") : ""); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
-                        Rectangle {
-                            objectName: "emptyModelsCard"
-                            visible: modelChoice.count === 0
-                            width: parent.width; height: 122; radius: 14; color: "white"; border.color: "#e2e5ef"
-                            Text { x: 16; y: 16; text: bridge.state.api_ready ? root.t("尚未同步模型", "No models discovered yet") : root.t("先连接你的 API", "Connect your API first"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
-                            Text { x: 16; y: 45; width: parent.width - 32; wrapMode: Text.WordWrap; text: bridge.state.api_ready ? root.t("点击上方同步按钮获取模型名单。已有的 OpenAI API 连接可直接沿用，无需重新输入 Key。", "Discover models using the button above. Existing official OpenAI API credentials can be reused.") : root.t("在「API 配置」保存地址和 Key，再回到这里同步模型。", "Save the URL and key in API setup, then return here."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11 }
-                        }
-                        ComboBox {
-                            id: modelChoice
-                            visible: count > 0
-                            objectName: "gatewayModelChoice"
-                            width: parent.width; height: 38
-                            model: bridge.state.models || []
-                            textRole: "id"
-                            property string selectedId: ""
-                            onActivated: selectedId = currentText
-                            onModelChanged: Qt.callLater(function() {
-                                if (selectedId) {
-                                    for (let i = 0; i < count; ++i) {
-                                        if (model[i].id === selectedId) { currentIndex = i; break }
-                                    }
-                                }
-                            })
-                            property var selected: currentIndex >= 0 && currentIndex < count ? model[currentIndex] : null
-                            onSelectedChanged: {
-                                enabledModel.checked = selected ? selected.enabled : false
-                                contextField.text = selected ? String(selected.context_window) : "32768"
-                                reasoningField.text = selected ? selected.reasoning.join(",") : ""
-                                imagesModel.checked = selected ? selected.images : false
-                            }
-                            enabled: !bridge.busy && count > 0
-                            font.family: bridge.fontFamily; font.pixelSize: 11
-                            background: Rectangle { radius: 10; color: "white"; border.color: "#dfe3ee" }
-                            contentItem: Text { text: modelChoice.displayText; leftPadding: 12; rightPadding: 28; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; color: root.ink; font: modelChoice.font }
-                            indicator: Canvas { x: parent.width - 27; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; onPaint: { const c=getContext("2d"); c.strokeStyle="#858998"; c.lineWidth=1.5; c.beginPath(); c.moveTo(4,6); c.lineTo(8,10); c.lineTo(12,6); c.stroke() } }
-                        }
-                        CatalogCheck { id: enabledModel; objectName: "gatewayEnable"; visible: modelChoice.count > 0; text: root.t("将此模型加入 Codex 菜单", "Include this model in Codex"); enabled: !bridge.busy && modelChoice.count > 0; font.family: bridge.fontFamily; font.pixelSize: 12 }
-                        Text {
-                            visible: modelChoice.count > 0; width: parent.width; text: root.showAdvanced ? root.t("收起能力设置 -", "Hide capability settings -") : root.t("能力设置：上下文 / 推理 / 图片 +", "Capabilities: context / reasoning / images +")
-                            color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.showAdvanced = !root.showAdvanced }
-                        }
-                        Column {
-                            width: parent.width; spacing: 8; visible: root.showAdvanced && modelChoice.count > 0
-                        Text { text: root.t("上下文 tokens（按实际模型填写）", "Context tokens (set the actual model limit)"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
-                        CatalogField { id: contextField; objectName: "gatewayContextField"; width: parent.width; height: 34; text: "32768"; enabled: !bridge.busy; selectByMouse: true; font.pixelSize: 12; validator: IntValidator { bottom: 4096; top: 4000000 } }
-                        Text { text: root.t("支持的推理档位，逗号分隔；未知则留空", "Reasoning levels, comma-separated; leave blank if unknown"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
-                        CatalogField { id: reasoningField; objectName: "gatewayReasoningField"; width: parent.width; height: 34; enabled: !bridge.busy; placeholderText: "low,medium,high"; selectByMouse: true; font.pixelSize: 12 }
-                        CatalogCheck { id: imagesModel; text: root.t("此模型及渠道支持图片输入", "This model and route support image input"); enabled: !bridge.busy; font.family: bridge.fontFamily; font.pixelSize: 12 }
-                        }
-                        Text { visible: modelChoice.count > 0; width: parent.width; wrapMode: Text.WordWrap; text: root.t("未设置能力时使用 32K、仅文本、无推理档位。请按渠道实际能力调整，兼容性未验证。", "Default: 32K, text only, no reasoning levels. Adjust to actual route capabilities. Compatibility is untested."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
-                        Text {
-                            visible: bridge.state.catalog_enabled; text: root.t("撤销自定义目录，保留 API 配置", "Reset custom catalog; keep API connection")
-                            color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10
-                            MouseArea { anchors.fill: parent; enabled: !bridge.busy; cursorShape: Qt.PointingHandCursor; onClicked: bridge.resetModels() }
-                        }
-                        Text { visible: modelChoice.count > 0; width: parent.width; wrapMode: Text.WordWrap; text: root.t("先保存每个模型，再应用。新增模型默认关闭。使用通用编程指令，Fast / Ultra 不开放；配置后重载 Codex 刷新菜单。账号设置会在切回时恢复。", "Save each model before applying. New entries start disabled. Generic coding instructions; Fast / Ultra disabled. Reload Codex after applying. Account settings restore when switching back."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
-                    }
-                }
-                Column {
-                    visible: modelChoice.count > 0
-                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; spacing: 8
-                        SoftButton { objectName: "saveModelButton"; width: parent.width; height: 36; text: root.t("保存此模型设置", "Save model settings"); enabled: !bridge.busy && modelChoice.count > 0; onClicked: bridge.configureModel(modelChoice.currentText, enabledModel.checked, contextField.text, reasoningField.text, imagesModel.checked) }
-                        SoftButton { objectName: "applyModelButton"; width: parent.width; height: 40; primary: true; text: root.t("以当前模型为默认并应用", "Apply with selected model as default"); enabled: !bridge.busy && modelChoice.count > 0; onClicked: bridge.applyModels(modelChoice.currentText) }
-                }
             }
 
             Item {
