@@ -1,5 +1,6 @@
 """macOS login Keychain via Security.framework; secrets never enter argv."""
 import ctypes as ct
+import os
 from pathlib import Path
 import sys
 
@@ -72,9 +73,13 @@ class MacOSCredentials:
         return result
 
     def _fields(self, owned):
-        return {"kSecClass": self._constant("kSecClassGenericPassword"),
-                "kSecAttrService": self._string("FoundL.CodexSwitch.OpenAI", owned),
-                "kSecAttrAccount": self._string(self.target, owned)}
+        fields = {"kSecClass": self._constant("kSecClassGenericPassword"),
+                  "kSecAttrService": self._string("FoundL.CodexSwitch.OpenAI", owned),
+                  "kSecAttrAccount": self._string(self.target, owned)}
+        if os.environ.get("CODEX_SWITCH_NO_KEYCHAIN_UI") == "1":
+            # CI must fail rather than waiting for an invisible authorization prompt.
+            fields["kSecUseAuthenticationUI"] = self._constant("kSecUseAuthenticationUIFail")
+        return fields
 
     def _release(self, owned):
         for value in reversed(owned):

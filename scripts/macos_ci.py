@@ -38,6 +38,7 @@ def main():
             security("list-keychains", "-d", "user", "-s", keychain, *previous_list)
             security("default-keychain", "-d", "user", "-s", keychain)
             environment = dict(os.environ)
+            environment["CODEX_SWITCH_NO_KEYCHAIN_UI"] = "1"
             certificate = environment.pop("MACOS_CERTIFICATE_P12", "")
             certificate_password = environment.pop("MACOS_CERTIFICATE_PASSWORD", "")
             if certificate:

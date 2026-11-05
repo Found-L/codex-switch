@@ -2,18 +2,20 @@
 
 English · [简体中文](README.md)
 
-A small Windows app and CLI for switching Codex between an existing account login and your own OpenAI API key.
+A Windows/macOS app and CLI for switching Codex between an existing account login and your own OpenAI API key.
 
 **[Download the installer / portable ZIP](https://github.com/Found-L/codex-switch/releases/latest)**
 
 ## Get started
 
 1. Install [Codex](https://learn.chatgpt.com/docs/quickstart). Sign in to Codex first if you want to use account credits.
-2. Install `CodexSwitch-VERSION-windows-x64-setup.exe`. Windows 10/11 x64; no Python or administrator access required.
+2. Install `CodexSwitch-VERSION-windows-x64-setup.exe`. Windows 10/11 x64; no Python or administrator access required. On macOS 14+, download the arm64 (Apple Silicon) or x64 (Intel) DMG, drag the app to Applications, then open that copy.
 3. Open **Codex Switch**, enter your own [OpenAI API key](https://platform.openai.com/api-keys), then select **Save and use API**. Choose your model and reasoning level in Codex. This tool preserves model configuration.
 4. Start a new Codex chat. Use the connection cards to switch back later. The UI includes an English/Chinese toggle.
 
-Keys are kept in Windows Credential Manager, scoped to your Windows user and Codex configuration directory. Enter your own key again on another computer. Account credits and API usage have separate billing.
+Keys are kept in Windows Credential Manager or the macOS login Keychain, scoped to your Windows user and Codex configuration directory. Enter your own key again on another computer. Account credits and API usage have separate billing.
+
+On Mac, use **Terminal → Install / repair terminal command**, then open a new terminal. The app runs in the menu bar; shortcuts use Command instead of Ctrl. macOS builds without Developer ID secrets are ad-hoc signed and not Apple-notarized; follow Apple’s first-open instructions in the [macOS guide](docs/macos.md).
 
 ## Window and tray
 
@@ -50,11 +52,13 @@ Existing official-OpenAI `openai_api` configurations can be reused without migra
 
 The UI shows global configuration, not the billing route of an already running chat. Existing chats, desktop prewarming/catalog caches, project configs and explicit CLI overrides can differ. Reload Codex if a full menu refresh is needed. The app does not terminate Codex.
 
-Setup is local and does not send requests to verify API access. Model availability, modes, quota and key validity depend on the OpenAI project. No model list is fabricated or filtered. Switching itself makes no network/model requests. Requires a Codex build supporting command-backed provider authentication; local baseline: CLI `0.166.0-alpha.6`. Only Windows 10/11 x64 is supported in this release.
+Setup is local and does not send requests to verify API access. Model availability, modes, quota and key validity depend on the OpenAI project. No model list is fabricated or filtered. Switching itself makes no network/model requests. Requires a Codex build supporting command-backed provider authentication; local baseline: CLI `0.166.0-alpha.6`. Release targets: Windows 10/11 x64 and macOS 14+ Apple Silicon/Intel. Linux is unsupported.
 
 The per-user installer adds an optional desktop shortcut and user PATH entry. Uninstallation first detaches this tool's managed provider, switches a managed active API config back to `openai`, and removes its keys for registered homes. Account login and local backups remain; external legacy providers are left intact. For portable builds, run `codex-switch remove-api --yes` before deleting files. If permissions/config errors prevent safe cleanup, repair the affected home before uninstalling.
 
 This is an independent community tool, not an OpenAI product. It bundles neither Codex nor API keys. Release binaries are not code-signed; SHA-256 checksums are provided.
+
+On Mac, run `codex-switch uninstall --yes` before deleting the app. This removes managed providers/keys, launcher and shell PATH blocks, preserving account login and backups. `uninstall-cli` removes terminal integration only.
 
 ## Build
 
@@ -67,4 +71,6 @@ python -m venv .venv
 .\scripts\build.ps1 -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 ```
 
-Tagging `v*` runs Windows CI tests/builds and publishes installer, portable ZIP and checksums. See [validation](docs/validation.md), [MIT license](LICENSE), and [third-party notices](THIRD_PARTY_NOTICES.md).
+On macOS, use `.venv/bin/python scripts/macos_ci.py` to build and test with an isolated temporary Keychain. Optional Developer ID/notarization credentials are documented in [the macOS guide](docs/macos.md).
+
+Tagging `v*` runs Windows and both native macOS CI tests/builds and publishes installer, portable ZIP and checksums. See [validation](docs/validation.md), [MIT license](LICENSE), and [third-party notices](THIRD_PARTY_NOTICES.md).

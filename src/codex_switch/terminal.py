@@ -53,12 +53,14 @@ def _apply(changes):
         for path, original, updated, mode in changes:
             if original == updated:
                 continue
+            if _read(path) != original:
+                raise SwitchError("Terminal configuration changed in another program; retry after saving it.")
             if updated is None:
                 path.unlink(missing_ok=True)
             else:
                 _atomic_write(path, updated, mode)
             applied.append((path, original, mode))
-    except OSError:
+    except (OSError, SwitchError):
         for path, original, mode in reversed(applied):
             if original is None:
                 path.unlink(missing_ok=True)
