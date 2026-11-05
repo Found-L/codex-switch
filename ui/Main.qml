@@ -27,8 +27,8 @@ Window {
     onClosing: function(event) {
         if (!bridge.testingMode) { event.accepted = false; bridge.hideToTray() }
     }
-    onVisibilityChanged: {
-        if (visibility === Window.Minimized && !bridge.testingMode) bridge.hideToTray()
+    onVisibilityChanged: function(newVisibility) {
+        if (newVisibility === Window.Minimized && !bridge.testingMode) bridge.hideToTray()
         if (visible) appear.restart()
     }
     Component.onCompleted: { displayedPage = page; sceneReady = true }

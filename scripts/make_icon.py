@@ -1,5 +1,8 @@
 """Render the original linked-capsule brand at native Windows icon sizes."""
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
@@ -46,7 +49,17 @@ def main():
     icon.resize((88, 88), Image.Resampling.LANCZOS).save(DESTINATION / "logo-88.png")
     sizes = [(n, n) for n in (16, 20, 24, 32, 40, 48, 64, 128, 256)]
     large.save(DESTINATION / "codex-switch.ico", sizes=sizes)
-    icon.save(DESTINATION / "codex-switch.icns", format="ICNS")
+    if sys.platform == "darwin":
+        with tempfile.TemporaryDirectory(prefix="codex-switch-icon-") as temporary:
+            iconset = Path(temporary) / "CodexSwitch.iconset"
+            iconset.mkdir()
+            for points in (16, 32, 128, 256, 512):
+                for multiplier, suffix in ((1, ""), (2, "@2x")):
+                    pixels = points * multiplier
+                    icon.resize((pixels, pixels), Image.Resampling.LANCZOS).save(iconset / f"icon_{points}x{points}{suffix}.png")
+            subprocess.run(["/usr/bin/iconutil", "-c", "icns", str(iconset), "-o", str(DESTINATION / "codex-switch.icns")], check=True)
+    else:
+        icon.save(DESTINATION / "codex-switch.icns", format="ICNS")
     template = Image.new("RGBA", icon.size, (0, 0, 0, 0))
     template.putalpha(ImageChops.lighter(ImageChops.subtract(first, shadow), second))
     template.resize((64, 64), Image.Resampling.LANCZOS).save(DESTINATION / "tray-template.png")

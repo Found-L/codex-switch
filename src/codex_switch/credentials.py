@@ -2,7 +2,10 @@
 import ctypes
 from ctypes import wintypes
 import hashlib
+import json
 import os
+from pathlib import Path
+import subprocess
 import sys
 
 from .errors import SwitchError
@@ -29,6 +32,42 @@ def default_credentials(home, helper=None):
     if os.name == "nt":
         return WindowsCredentials(home)
     raise SwitchError("Codex Switch supports Windows and macOS.")
+
+
+class HelperCredentials:
+    """Keep packaged macOS GUI and CLI Keychain operations under one code identity."""
+    def __init__(self, home, command):
+        self.home = Path(home)
+        self.executable, self.prefix = command
+
+    def _call(self, operation, key=None):
+        arguments = [self.executable, *self.prefix, "--codex-home", str(self.home), "vault-" + operation]
+        result = subprocess.run(arguments, input=key + "\n" if key is not None else None,
+                                capture_output=True, text=True, encoding="utf-8", timeout=20)
+        if result.returncode:
+            raise SwitchError("Cannot access macOS Keychain through the helper. Unlock the login keychain and allow codex-switch if prompted.")
+        try:
+            data = json.loads(result.stdout)
+        except (ValueError, TypeError):
+            raise SwitchError("The credential helper returned an invalid response.") from None
+        if not isinstance(data, dict):
+            raise SwitchError("The credential helper returned an invalid response.")
+        return data
+
+    def read(self):
+        data = self._call("read")
+        key = data.get("key")
+        if key is not None and not isinstance(key, str):
+            raise SwitchError("The credential helper returned an invalid credential type.")
+        return key
+
+    def write(self, key):
+        if self._call("write", key).get("ok") is not True:
+            raise SwitchError("The credential helper did not save the key.")
+
+    def delete(self):
+        if self._call("delete").get("ok") is not True:
+            raise SwitchError("The credential helper did not remove the key.")
 
 
 class Credential(ctypes.Structure):

@@ -36,6 +36,8 @@ def main(argv=None):
     uninstall = commands.add_parser("uninstall", help="macOS: detach managed providers/keys and terminal integration before deleting the app")
     uninstall.add_argument("--yes", action="store_true")
     commands.add_parser("credential", help=argparse.SUPPRESS)
+    for action in ("read", "write", "delete"):
+        commands.add_parser("vault-" + action, help=argparse.SUPPRESS)
     commands.add_parser("uninstall-cleanup", help=argparse.SUPPRESS)
     remove = commands.add_parser("remove-api", help="Remove this tool's provider/key; preserve Codex account login")
     remove.add_argument("--yes", action="store_true")
@@ -82,6 +84,24 @@ def main(argv=None):
                 SwitchService(home).remove_api()
             return 0
         service = SwitchService(args.codex_home)
+        if args.command.startswith("vault-"):
+            if sys.stdout.isatty():
+                raise SwitchError("Internal credential protocol requires redirected output.")
+            if args.command == "vault-read":
+                response = {"key": service.credentials.read()}
+            elif args.command == "vault-write":
+                if sys.stdin.isatty():
+                    raise SwitchError("Internal credential input must be redirected.")
+                key = sys.stdin.read(2561).strip()
+                if not key or any(c.isspace() or ord(c) < 32 for c in key) or len(key.encode("utf-8")) > 2560:
+                    raise SwitchError("API key length or characters are invalid.")
+                service.credentials.write(key)
+                response = {"ok": True}
+            else:
+                service.credentials.delete()
+                response = {"ok": True}
+            print(json.dumps(response), flush=True)
+            return 0
         if args.command == "credential":
             if sys.stdout.isatty():
                 raise SwitchError("Internal credential helper; output to an interactive terminal is disabled.")

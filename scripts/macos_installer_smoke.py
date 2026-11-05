@@ -8,7 +8,7 @@ import tempfile
 import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from codex_switch.credentials import default_credentials
+from codex_switch.credentials import default_credentials, HelperCredentials
 
 
 def main():
@@ -75,8 +75,9 @@ def main():
             assert "codex_switch_api" not in after.get("model_providers", {})
             assert (config / "auth.json").read_bytes() == b"macos-account-sentinel"
             assert default_credentials(config, str(helper)).read() is None
-            # GUI-side Keychain writes explicitly authorize the separate bundled CLI.
-            store = default_credentials(config, str(helper))
+            # The packaged GUI delegates Keychain writes to the same helper
+            # identity used by CLI setup, provider auth and uninstallation.
+            store = HelperCredentials(config, (str(helper), []))
             store.write("macos-cross-process-fixture")
             assert call(helper, "credential").strip() == "macos-cross-process-fixture"
             call(helper, "setup", "--key-stdin", "--use", stdin="macos-cross-process-updated\n")

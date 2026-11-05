@@ -5,7 +5,7 @@ import sys
 import tomllib
 
 from .config import API_URL, LEGACY, PROVIDER, ConfigFile, default_home, lock, parse, patch
-from .credentials import default_credentials
+from .credentials import default_credentials, HelperCredentials
 from .errors import SwitchError
 
 MANAGED_NAME = "OpenAI API (Codex Switch)"
@@ -55,7 +55,12 @@ class SwitchService:
         self.config = ConfigFile(home or default_home())
         self.home = self.config.home
         self.helper = helper or helper_command()
-        self.credentials = credentials if credentials is not None else default_credentials(self.home, self.helper[0])
+        if credentials is not None:
+            self.credentials = credentials
+        elif sys.platform == "darwin" and getattr(sys, "frozen", False) and Path(sys.executable).parent.name == "MacOS":
+            self.credentials = HelperCredentials(self.home, self.helper)
+        else:
+            self.credentials = default_credentials(self.home, self.helper[0])
         self.track = track
 
     @staticmethod

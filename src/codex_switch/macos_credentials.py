@@ -17,12 +17,6 @@ class MacOSCredentials:
             raise SwitchError("macOS Keychain requires macOS.")
         self.target = target_for(home)
         self.trusted_paths = sorted({str(Path(p).resolve()) for p in trusted_paths if p})
-        for executable in tuple(self.trusted_paths):
-            path = Path(executable)
-            if path.parent.name == "Helpers" and path.parent.parent.name == "Contents":
-                gui = path.parent.parent / "MacOS" / "Codex Switch"
-                if gui.is_file():
-                    self.trusted_paths.append(str(gui))
         self.cf = ct.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
         self.security = ct.CDLL("/System/Library/Frameworks/Security.framework/Security")
         signatures = {

@@ -57,8 +57,8 @@ def application(testing=False):
 
 
 def app_icon():
-    extension = "icns" if sys.platform == "darwin" else "ico"
-    return QIcon(str(resources() / "assets" / ("codex-switch." + extension)))
+    filename = "logo.png" if sys.platform == "darwin" else "codex-switch.ico"
+    return QIcon(str(resources() / "assets" / filename))
 
 
 class Bridge(QObject):
