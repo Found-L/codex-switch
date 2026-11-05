@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import shlex
+import sys
 import tempfile
 
 from .errors import SwitchError
@@ -14,6 +15,13 @@ PATH_BLOCK = (BEGIN + '\ncase ":$PATH:" in\n'
               '  *) export PATH="$HOME/.local/bin:$PATH" ;;\n'
               'esac\n' + END + '\n')
 SHELL_FILES = (".zprofile", ".zshrc", ".bash_profile", ".bashrc")
+
+
+def ensure_stable_installation(helper):
+    helper = Path(helper).resolve()
+    readonly = sys.platform == "darwin" and bool(os.statvfs(helper).f_flag & os.ST_RDONLY)
+    if str(helper).startswith("/Volumes/") or "/AppTranslocation/" in str(helper) or readonly:
+        raise SwitchError("Copy Codex Switch.app to Applications and open that copy before configuring it.")
 
 
 def _read(path):
@@ -74,8 +82,7 @@ def install_cli(helper, home=None, shell=None, configure_shell=True):
     if (not helper.is_file() or helper.name != "codex-switch"
             or helper.parent.name != "Helpers" or helper.parent.parent.name != "Contents"):
         raise SwitchError("Install CLI from the packaged Codex Switch.app first.")
-    if str(helper).startswith("/Volumes/") or "/AppTranslocation/" in str(helper):
-        raise SwitchError("Copy Codex Switch.app to Applications before installing its command.")
+    ensure_stable_installation(helper)
     home = Path(home or Path.home())
     launcher = home / ".local" / "bin" / "codex-switch"
     previous = _read(launcher)

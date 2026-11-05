@@ -119,9 +119,8 @@ class SwitchService:
 
     def setup(self, key):
         if sys.platform == "darwin" and getattr(sys, "frozen", False):
-            helper = Path(self.helper[0]).resolve()
-            if str(helper).startswith("/Volumes/") or "/AppTranslocation/" in str(helper):
-                raise SwitchError("Copy Codex Switch.app to Applications and open that copy before saving a key.")
+            from .terminal import ensure_stable_installation
+            ensure_stable_installation(self.helper[0])
         if key is not None:
             key = key.strip()
             if not key or any(c.isspace() or ord(c) < 32 for c in key) or len(key.encode("utf-8")) > 2560:

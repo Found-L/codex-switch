@@ -37,6 +37,11 @@ def main():
         try:
             call("/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount, dmg)
             mounted = True
+            blocked = subprocess.run([str(mount / "Codex Switch.app/Contents/Helpers/codex-switch"),
+                                      "setup", "--key-stdin", "--use"], input="blocked-fixture\n",
+                                     text=True, capture_output=True, env=environment, timeout=30)
+            assert blocked.returncode != 0 and "Copy Codex Switch.app" in blocked.stderr
+            assert not (config / "config.toml").exists()
             call("/usr/bin/ditto", mount / "Codex Switch.app", app)
             call("/usr/bin/hdiutil", "detach", mount)
             mounted = False
@@ -71,6 +76,10 @@ def main():
             store = default_credentials(config, str(helper))
             store.write("macos-cross-process-fixture")
             assert call(helper, "credential").strip() == "macos-cross-process-fixture"
+            call(helper, "setup", "--key-stdin", "--use", stdin="macos-cross-process-updated\n")
+            assert call(helper, "credential").strip() == "macos-cross-process-updated"
+            call(helper, "uninstall", "--yes")
+            assert store.read() is None
             print("macOS DMG smoke passed: copied app, native Keychain/helper, zsh PATH, account/API, uninstall; 0 model requests.")
         finally:
             if helper.is_file():
