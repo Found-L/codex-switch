@@ -80,6 +80,8 @@ class Bridge(QObject):
         self._language = "zh" if testing else self.settings.value("language", "zh")
         self._compact = False if testing else self.settings.value("compact", False, type=bool)
         self._font_family = "Segoe UI Variable Text" if "Segoe UI Variable Text" in QFontDatabase.families() else "Segoe UI"
+        families = QFontDatabase.families()
+        self._chinese_font = next((font for font in ("Microsoft YaHei UI", "Microsoft YaHei") if font in families), self._font_family)
         self._state = {"mode": "account", "api_ready": False, "key_saved": False, "profile_override": None}
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-config")
         self._completed.connect(self._apply_result)
@@ -132,9 +134,9 @@ class Bridge(QObject):
     def logoUrl(self):
         return QUrl.fromLocalFile(str(resources() / "assets" / "logo.png")).toString()
 
-    @Property(str, constant=True)
+    @Property(str, notify=languageChanged)
     def fontFamily(self):
-        return self._font_family
+        return self._chinese_font if self._language == "zh" else self._font_family
 
     def tr_text(self, zh, en):
         return zh if self._language == "zh" else en
@@ -459,6 +461,7 @@ def self_test(report):
             service = SwitchService(Path(home), credentials=MemoryCredentials(), track=False)
             model = Bridge(service, testing=True)
             engine, window = load_scene(model)
+            window.show()
             app.processEvents()
             names = ("connectionsPage", "keyPage", "terminalPage", "selectionPill", "apiKeyField")
             objects = {name: window.findChild(QObject, name) for name in names}
@@ -490,6 +493,21 @@ def self_test(report):
             for name, original in objects.items():
                 if window.findChild(QObject, name) is not original:
                     raise RuntimeError("A state update rebuilt the scene.")
+            for page in ("key", "terminal", "connections"):
+                samples = []
+                loop = QEventLoop()
+                sample_timer = QTimer()
+                sample_timer.setInterval(8)
+                sample_timer.timeout.connect(lambda: samples.append(sum(
+                    bool(objects[name].property("visible"))
+                    for name in ("connectionsPage", "keyPage", "terminalPage"))))
+                sample_timer.start()
+                model.openPage.emit(page)
+                QTimer.singleShot(300, loop.quit)
+                loop.exec()
+                sample_timer.stop()
+                if not samples or max(samples) > 1 or not objects[page + "Page"].property("visible"):
+                    raise RuntimeError("Page transitions overlap or fail to reveal the destination.")
             model.toggleCompact()
             app.processEvents()
             if window.width() != 372 or window.height() != 302:
@@ -503,6 +521,7 @@ def self_test(report):
             server.close()
             result = {"ok": True, "version": __version__, "qt": pyside_version,
                       "persistent_controls": True, "async_switching": True,
+                      "page_transition_no_overlap": True,
                       "mini_window": True, "single_instance": True, "setup_entry_count": 1}
             model.shutdown()
             model = None

@@ -12,6 +12,8 @@ Window {
     title: "Codex Switch"
     flags: Qt.Window | Qt.FramelessWindowHint
     property string page: bridge.state.api_ready ? "connections" : "key"
+    property string displayedPage: ""
+    property bool sceneReady: false
     property bool showKey: false
     readonly property color accent: "#6055da"
     readonly property color ink: "#252938"
@@ -29,7 +31,18 @@ Window {
         if (visibility === Window.Minimized && !bridge.testingMode) bridge.hideToTray()
         if (visible) appear.restart()
     }
-    onPageChanged: { if (page !== "key") { keyField.clear(); showKey = false } }
+    Component.onCompleted: { displayedPage = page; sceneReady = true }
+    onPageChanged: {
+        if (page !== "key") { keyField.clear(); showKey = false }
+        if (sceneReady && visible) pageTransition.restart()
+        else displayedPage = page
+    }
+    SequentialAnimation {
+        id: pageTransition
+        NumberAnimation { target: pages; property: "opacity"; to: 0; duration: 70; easing.type: Easing.OutQuad }
+        ScriptAction { script: root.displayedPage = root.page }
+        NumberAnimation { target: pages; property: "opacity"; to: 1; duration: 110; easing.type: Easing.OutCubic }
+    }
 
     Connections {
         target: bridge
@@ -184,7 +197,6 @@ Window {
             NumberAnimation { target: panel; property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.OutCubic }
             NumberAnimation { target: panel; property: "scale"; from: 0.98; to: 1; duration: 190; easing.type: Easing.OutCubic }
         }
-        Rectangle { x: parent.width - 160; y: -105; width: 240; height: 220; radius: 110; color: "#eeeafa"; opacity: 0.45 }
         MouseArea { x: 0; y: 0; width: parent.width; height: 76; onPressed: root.startSystemMove() }
         Image { x: 22; y: 20; width: 34; height: 34; source: bridge.logoUrl; smooth: true; mipmap: true }
         Text { x: 66; y: 20; text: "Codex Switch"; color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold }
@@ -218,14 +230,13 @@ Window {
         Item {
             id: pages
             visible: !bridge.compact
+            enabled: !pageTransition.running
             x: 24; y: 144; width: parent.width - 48; height: parent.height - 210
             Item {
                 id: connectionsPage
                 objectName: "connectionsPage"
                 anchors.fill: parent
-                opacity: root.page === "connections" ? 1 : 0
-                visible: opacity > 0; enabled: root.page === "connections"
-                Behavior on opacity { NumberAnimation { duration: 140 } }
+                visible: root.displayedPage === "connections"
                 Rectangle {
                     width: parent.width; height: 144; radius: 18; color: "white"; border.color: "#e4e6ef"
                     Text { x: 20; y: 18; text: root.t("当前连接配置", "CURRENT CONFIGURATION"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10; font.letterSpacing: 0.4 }
@@ -243,9 +254,7 @@ Window {
                 id: keyPage
                 objectName: "keyPage"
                 anchors.fill: parent
-                opacity: root.page === "key" ? 1 : 0
-                visible: opacity > 0; enabled: root.page === "key"
-                Behavior on opacity { NumberAnimation { duration: 140 } }
+                visible: root.displayedPage === "key"
                 Text { text: root.t("连接你的 OpenAI API", "Connect your OpenAI API"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 21; font.weight: Font.DemiBold }
                 Text { y: 37; width: parent.width; text: root.t("只需配置一次，之后随时切换。", "Set up once. Switch whenever you need."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap }
                 Text { y: 86; text: "OpenAI API Key"; color: "#656b7b"; font.family: bridge.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold }
@@ -277,9 +286,7 @@ Window {
                 id: terminalPage
                 objectName: "terminalPage"
                 anchors.fill: parent
-                opacity: root.page === "terminal" ? 1 : 0
-                visible: opacity > 0; enabled: root.page === "terminal"
-                Behavior on opacity { NumberAnimation { duration: 140 } }
+                visible: root.displayedPage === "terminal"
                 Text { text: root.t("终端里，也很顺手", "Just as easy in your terminal"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 20; font.weight: Font.DemiBold }
                 Text { y: 36; width: parent.width; text: root.t("安装后重新打开终端，即可使用。", "Open a new terminal after installation."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
                 Column {

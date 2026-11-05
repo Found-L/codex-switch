@@ -1,13 +1,10 @@
-## Codex Switch v0.2.0
+## Codex Switch v0.2.1
 
-- 重做为 Qt Quick 界面：常驻控件、异步保存、滑块与淡入淡出过渡，静默刷新不再闪动保存状态。
-- 新增迷你窗口、Windows 系统托盘、托盘菜单切换与重复启动唤回。关闭窗口收进托盘，右键菜单可退出。
-- 统一原创多尺寸图标、安装器和快捷方式的 Windows 应用标识。
-- API Key 配置整合到同一面板，移除「初始模型」字段及 CLI `setup --model`；保留原模型配置，模型和推理档位在 Codex 中选择。
-- 终端命令继续可用。界面运行库随包附带，无需安装 Python。
+- 页面切换改为先淡出再淡入，消除 Key、连接与终端页面在过渡中叠字的问题。
+- 中文界面明确使用微软雅黑字体，修复标题意外回退到宋体。
+- 去除越过圆角的装饰背景，保持四角形状一致。
+- 增加过渡采样自检：切换期间最多只显示一个页面，并确认目标页面可见。
 
-快捷键：Ctrl+M 收进托盘，Ctrl+Shift+M 切换小窗，Ctrl+Q 退出。托盘图标可能藏在 Windows 任务栏的隐藏图标中。
+保留 v0.2.0 的迷你窗口、托盘切换、单实例唤回和终端命令。模型与推理档位仍在 Codex 中选择。切换后请新建 Codex 会话。
 
-切换后请新建 Codex 会话，已有会话保留原来源。API 权限与额度以自己的 OpenAI 项目为准；不发送付费请求验证。
-
-Persistent Qt Quick UI with animated transitions, asynchronous configuration changes, a mini window, native Windows tray switching and single-instance activation. New application icon throughout. API setup preserves model settings; choose models in Codex. Windows 10/11 x64.
+Page transitions now fade out before fading in, preventing overlapping text. Consistent Chinese sans-serif fonts and rounded corners. Adds transition visibility checks. Windows 10/11 x64.

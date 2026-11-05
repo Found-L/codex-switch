@@ -14,4 +14,5 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-gui-report-") as temporary
     if not data.get("ok"):
         raise SystemExit("Frozen GUI startup failed: " + str(data.get("error_type")))
     assert data["persistent_controls"] and data["async_switching"] and data["mini_window"]
+    assert data["page_transition_no_overlap"]
     print("Packaged Qt " + data["qt"] + " GUI passed: persistent scene, async switching, mini window.")
