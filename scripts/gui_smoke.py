@@ -8,7 +8,9 @@ import tempfile
 with tempfile.TemporaryDirectory(prefix="codex-switch-gui-report-") as temporary:
     report = Path(temporary) / "result.json"
     native = "--native-keychain" in sys.argv[2:]
-    result = subprocess.run([str(Path(sys.argv[1]).resolve()), "--self-test-keychain" if native else "--self-test", str(report)], timeout=30)
+    # The native fixture also verifies the macOS Keychain and signed helper.
+    timeout = 90 if native else 30
+    result = subprocess.run([str(Path(sys.argv[1]).resolve()), "--self-test-keychain" if native else "--self-test", str(report)], timeout=timeout)
     if not report.is_file():
         raise SystemExit("Frozen GUI self-test did not complete.")
     data = json.loads(report.read_text("utf-8"))
