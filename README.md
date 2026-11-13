@@ -6,6 +6,8 @@ Windows / macOS 上的 Codex 账号 / API 切换工具。支持 OpenAI 官方 AP
 
 **[下载安装包 / 便携版](https://github.com/Found-L/codex-switch/releases/latest)** · [问题反馈](https://github.com/Found-L/codex-switch/issues)
 
+Fast / Ultrafast 入口消失？0.8.4 在「API 配置 → API 速度」或连接页「Fast / Ultrafast」中提供「启用 Codex 的 Fast / Ultrafast」。点击后完全退出 Codex，Switch 会自动重开并加载内存适配；面板显示等待、加载、失败等实际状态。原生适配保留原有 OpenAI API 提供商，兼容已有 API 会话。普通界面已移除会改变提供商的备用转发按钮。支持 Windows Codex 26.1029.7803.0、26.1103.3517.0、26.1106.6628.0 与直连 OpenAI API；账号速度由 Codex 自己管理。详见 [速度设置与兼容范围](docs/speed-modes.md)。
+
 ![Codex Switch 连接总览](docs/images/overview.png)
 
 ## 新电脑开始使用

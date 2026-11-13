@@ -10,6 +10,7 @@ from .credentials import default_credentials, HelperCredentials
 from .errors import SwitchError
 from .catalog import endpoint, discover, merge_discovery, make_catalog, model_info, classification, official_metadata, bundled_metadata, enrich_models
 from .settings import MODEL_KEYS, read_state, write_state, atomic_json
+from .speed import FAST_MODELS, SPEED_PROVIDER, ULTRA_MODELS, observed
 import hashlib
 from copy import deepcopy
 
@@ -73,6 +74,7 @@ class SwitchService:
         return isinstance(provider, dict) and provider.get("name") in (MANAGED_NAME, "OpenAI API (Codex Switch)")
 
     def status(self):
+        from .native import runtime_status as native_runtime_status
         config = parse(self.config.read())
         connection = read_state(self.home)
         providers = config.get("model_providers", {})
@@ -80,7 +82,8 @@ class SwitchService:
         own = providers.get(PROVIDER)
         legacy = providers.get(LEGACY, {})
         key_saved = False
-        if own is not None:
+        selected_api = connection.get("speed_upstream_provider") if connection.get("speed_enabled") else current
+        if own is not None and selected_api != LEGACY:
             api_id = PROVIDER
             key_saved = self.managed(own) and bool(self.credentials.read())
             command, prefix = self.helper
@@ -94,11 +97,24 @@ class SwitchService:
         else:
             api_id = LEGACY if legacy.get("base_url", "").rstrip("/") == API_URL and not legacy.get("requires_openai_auth") else PROVIDER
             ready = api_id == LEGACY and legacy.get("wire_api", "responses") == "responses" and (bool(legacy.get("auth", {}).get("command")) or bool(legacy.get("env_key")) or bool(legacy.get("experimental_bearer_token")))
-        mode = "account" if current == "openai" else "api" if current in (PROVIDER, LEGACY) else "other"
+        mode = "account" if current == "openai" else "api" if current in (PROVIDER, LEGACY, SPEED_PROVIDER) else "other"
         profile = config.get("profile")
         override = config.get("profiles", {}).get(profile, {}).get("model_provider") if profile else None
         catalog_configured = config.get("model_catalog_json") == connection.get("catalog") and bool(connection.get("catalog"))
         catalog_models = []
+        speed_tiers = []
+        # Only the catalog referenced by config describes configured model metadata.
+        # Saved drafts and the bundled fallback do not prove desktop availability.
+        if config.get("model_catalog_json"):
+            try:
+                speed_path = Path(config["model_catalog_json"])
+                if speed_path.stat().st_size <= 1024 * 1024:
+                    entry = next((m for m in json.loads(speed_path.read_text("utf-8"))["models"]
+                                  if m.get("slug") == config.get("model")), {})
+                    speed_tiers = [t["id"] for t in entry.get("service_tiers", [])
+                                   if isinstance(t, dict) and t.get("id") in ("fast", "priority", "ultrafast", "flex")]
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
         if connection.get("catalog"):
             try:
                 catalog_path = Path(connection["catalog"])
@@ -114,9 +130,20 @@ class SwitchService:
             "api_model": connection.get("api_model", ""),
             "saved_model_ids": catalog_models,
             "runtime_status": "not_inspected",
+            "configured_service_tier": config.get("service_tier"),
+            "configured_fast_mode": config.get("features", {}).get("fast_mode"),
+            "catalog_service_tiers": speed_tiers,
+            "speed_verification": "not_verified",
+            "speed_enabled": bool(connection.get("speed_enabled")),
+            "speed_tier": connection.get("speed_tier", ""),
+            "speed_route_configured": current == SPEED_PROVIDER,
+            "native_speed_configured": bool(connection.get("native_speed")) and config.get("model_catalog_json") == connection.get("native_speed", {}).get("catalog"),
+            "native_speed_saved": bool(connection.get("native_speed")),
+            "native_runtime": native_runtime_status(self),
+            "speed_observed": observed(self.home) if connection.get("speed_enabled") else {},
             "config_exists": self.config.path.exists(),
             "profile_override": override, "model_requests": 0,
-            "base_url": connection.get("base_url", API_URL),
+            "base_url": API_URL if api_id == LEGACY else connection.get("base_url", API_URL),
             "api_label": "OpenAI API" if connection.get("base_url", API_URL) == API_URL else "Custom API",
             "models": [{**{k: v for k, v in m.items() if k != "official_entry"},
                         "category": m.get("category", classification(m["id"])),
@@ -152,18 +179,32 @@ class SwitchService:
             pass
         return backup
 
-    def _model_settings(self, doc, connection, mode):
+    def _model_settings(self, doc, connection, mode, api_provider=None):
         """Restore account values before changing endpoints or leaving the catalog."""
         if "account_settings" in connection:
             if doc.get("model_provider") != connection.get("active_provider", PROVIDER) or doc.get("model_catalog_json") != connection.get("active_catalog"):
                 raise SwitchError("Model catalog changed outside Codex Switch. Restore the managed catalog before switching.")
             connection["api_model"] = doc.get("model", connection.get("api_model"))
+            connection["api_service_tier"] = doc.get("service_tier")
             for key in MODEL_KEYS:
                 if key in connection["account_settings"]:
                     doc[key] = connection["account_settings"][key]
                 else:
                     doc.pop(key, None)
             del connection["account_settings"]
+            connection.pop("active_catalog", None)
+            connection.pop("active_provider", None)
+        elif "account_speed" in connection:
+            if doc.get("model_provider") != connection.get("active_provider") or doc.get("model_catalog_json") != connection.get("active_catalog"):
+                raise SwitchError("Model catalog changed outside Codex Switch. Restore the managed catalog before switching.")
+            connection["api_model"] = doc.get("model", connection.get("api_model"))
+            connection["api_service_tier"] = doc.get("service_tier")
+            connection["direct_speed_preference"] = {"model": doc.get("model"), "tier": doc.get("service_tier")}
+            account_speed = connection.pop("account_speed")
+            if "service_tier" in account_speed:
+                doc["service_tier"] = account_speed["service_tier"]
+            else:
+                doc.pop("service_tier", None)
             connection.pop("active_catalog", None)
             connection.pop("active_provider", None)
         if mode == "api" and connection.get("catalog"):
@@ -179,10 +220,34 @@ class SwitchService:
             chosen = connection.get("api_model")
             doc["model"] = chosen if chosen in slugs else slugs[0]
             entry = next(m for m in data["models"] if m["slug"] == doc["model"])
+            tier = connection.get("api_service_tier")
+            supported = {t.get("id") for t in entry.get("service_tiers", []) if isinstance(t, dict)}
+            if tier in ("fast", "priority") and supported.intersection(("fast", "priority")):
+                doc["service_tier"] = tier
+            elif tier == "default" or (tier in ("ultrafast", "flex") and tier in supported):
+                doc["service_tier"] = tier
             if entry.get("default_reasoning_level"):
                 doc["model_reasoning_effort"] = entry["default_reasoning_level"]
             connection["active_catalog"] = str(path)
-            connection["active_provider"] = connection.get("catalog_provider", PROVIDER)
+            connection["active_provider"] = SPEED_PROVIDER if connection.get("speed_enabled") else connection.get("catalog_provider", PROVIDER)
+        elif mode == "api":
+            # Direct API connections may not have a catalog. Keep the account's
+            # setting untouched when returning, and never inherit a paid tier.
+            connection["account_speed"] = {k: deepcopy(doc[k]) for k in ("service_tier",) if k in doc}
+            connection["active_catalog"] = doc.get("model_catalog_json")
+            connection["active_provider"] = api_provider
+            preference = connection.get("direct_speed_preference")
+            preference = preference if isinstance(preference, dict) else {}
+            tier, model = preference.get("tier"), doc.get("model")
+            same_model = model and model == preference.get("model")
+            if tier == "default" or (same_model and tier in ("fast", "priority") and model in FAST_MODELS) or (same_model and tier == "ultrafast" and model in ULTRA_MODELS):
+                doc["service_tier"] = tier
+            elif "service_tier" in connection["account_speed"]:
+                # Retain the original TOML field and its comments/position so it
+                # can be restored byte-for-byte when switching back.
+                doc["service_tier"] = "default"
+            else:
+                doc.pop("service_tier", None)
 
     def use(self, mode):
         if mode not in ("api", "account"):
@@ -207,11 +272,15 @@ class SwitchService:
             selected_profile = before.get("profiles", {}).get(before.get("profile"), {})
             if connection.get("catalog") and any(k in selected_profile for k in MODEL_KEYS):
                 raise SwitchError("The selected profile overrides model settings. Remove these overrides before applying a catalog.")
+            if mode == "api" and "service_tier" in selected_profile:
+                raise SwitchError("The selected profile overrides the speed tier. Remove this override before switching to API.")
             requested = state["api_provider"] if mode == "api" else "openai"
+            if mode == "api" and connection.get("speed_enabled"):
+                requested = SPEED_PROVIDER
             if before.get("model_provider", "openai") == requested and (mode != "api" or not connection.get("catalog") or before.get("model_catalog_json") == connection["catalog"]):
                 return {"changed": False, **state}
             expected = deepcopy(before)
-            self._model_settings(expected, connection, mode)
+            self._model_settings(expected, connection, mode, requested)
             expected["model_provider"] = requested
             def change(doc):
                 for key in (*MODEL_KEYS, "model_provider"):
@@ -243,11 +312,21 @@ class SwitchService:
                 raise SwitchError("Enter the key for the new API address. A saved key is never reused on another endpoint.")
             reset_models = changed_endpoint or (key is not None and key != self.credentials.read())
             if reset_models:
+                had_account_snapshot = "account_settings" in connection or "account_speed" in connection
                 self._model_settings(expected, connection, "account")
+                if expected.get("model_provider") == SPEED_PROVIDER:
+                    expected["model_provider"] = PROVIDER if url == API_URL else "openai"
+                expected.get("model_providers", {}).pop(SPEED_PROVIDER, None)
+                connection.pop("speed_enabled", None)
+                connection.pop("speed_tier", None)
+                connection.pop("speed_upstream_provider", None)
+                connection.pop("native_speed", None)
                 if url != API_URL and expected.get("model_provider") == PROVIDER:
                     expected["model_provider"] = "openai"
-                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
+                for name in ("models", "catalog", "api_model", "api_service_tier", "direct_speed_preference", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
                     connection.pop(name, None)
+                if had_account_snapshot and expected.get("model_provider") in (PROVIDER, LEGACY):
+                    self._model_settings(expected, connection, "api", expected["model_provider"])
             connection["base_url"] = url
             providers = expected.setdefault("model_providers", {})
             if PROVIDER in providers and not self.managed(providers[PROVIDER]):
@@ -270,6 +349,7 @@ class SwitchService:
                     doc["model_providers"] = {}
                 doc["model_providers"][PROVIDER] = provider
                 if reset_models:
+                    doc["model_providers"].pop(SPEED_PROVIDER, None)
                     for name in MODEL_KEYS:
                         if name in expected:
                             doc[name] = expected[name]
@@ -356,12 +436,23 @@ class SwitchService:
             original = self.config.read()
             expected = parse(original)
             connection = read_state(self.home)
+            had_account_snapshot = "account_settings" in connection or "account_speed" in connection
             self._model_settings(expected, connection, "account")
+            if expected.get("model_provider") == SPEED_PROVIDER:
+                expected["model_provider"] = self.status()["api_provider"]
+            expected.get("model_providers", {}).pop(SPEED_PROVIDER, None)
+            connection.pop("speed_enabled", None)
+            connection.pop("speed_tier", None)
+            connection.pop("speed_upstream_provider", None)
+            connection.pop("native_speed", None)
             if expected.get("model_provider") == PROVIDER and connection.get("base_url", API_URL) != API_URL:
                 expected["model_provider"] = "openai"
-            for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
+            for name in ("models", "catalog", "api_model", "api_service_tier", "direct_speed_preference", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
                 connection.pop(name, None)
+            if had_account_snapshot and expected.get("model_provider") in (PROVIDER, LEGACY):
+                self._model_settings(expected, connection, "api", expected["model_provider"])
             def change(doc):
+                doc.get("model_providers", {}).pop(SPEED_PROVIDER, None)
                 for name in (*MODEL_KEYS, "model_provider"):
                     if name in expected:
                         doc[name] = expected[name]
@@ -413,6 +504,7 @@ class SwitchService:
             content = json.dumps(catalog, ensure_ascii=False, sort_keys=True).encode()
             path = self.home / "codex-switch" / "catalogs" / (hashlib.sha256(content).hexdigest() + ".json")
             atomic_json(path, catalog)
+            connection.pop("native_speed", None)
             connection["catalog"] = str(path)
             connection["catalog_provider"] = state["api_provider"]
             connection["catalog_dirty"] = False
@@ -424,7 +516,7 @@ class SwitchService:
                 if default_model:
                     connection["api_model"] = default_model
                 self._model_settings(expected, connection, "api")
-                expected["model_provider"] = state["api_provider"]
+                expected["model_provider"] = SPEED_PROVIDER if connection.get("speed_enabled") else state["api_provider"]
             def change(doc):
                 for name in (*MODEL_KEYS, "model_provider"):
                     if name in expected:
@@ -453,8 +545,10 @@ class SwitchService:
         return self.status()
 
     def remove_api(self):
+        from .speed import token_service
         if not self.config.path.exists():
             self.credentials.delete()
+            token_service(self).credentials.delete()
             return
         with lock(self.home):
             original = self.config.read()
@@ -463,12 +557,28 @@ class SwitchService:
             own = expected.get("model_providers", {}).get(PROVIDER)
             if own is not None and not self.managed(own):
                 raise SwitchError("Provider ID belongs to another tool; removal was stopped.")
-            if own is not None or "account_settings" in connection or connection.get("catalog") or connection.get("models"):
+            if own is not None or "account_settings" in connection or "account_speed" in connection or connection.get("catalog") or connection.get("models") or connection.get("speed_enabled") or SPEED_PROVIDER in expected.get("model_providers", {}):
+                legacy_direct = expected.get("model_provider") == LEGACY and "account_speed" in connection
+                legacy_tier = deepcopy(expected.get("service_tier"))
+                legacy_has_tier = "service_tier" in expected
                 self._model_settings(expected, connection, "account")
                 if own is not None:
                     del expected["model_providers"][PROVIDER]
-                if expected.get("model_provider") == PROVIDER:
+                if expected.get("model_provider") in (PROVIDER, SPEED_PROVIDER):
                     expected["model_provider"] = "openai"
+                expected.get("model_providers", {}).pop(SPEED_PROVIDER, None)
+                connection.pop("speed_enabled", None)
+                connection.pop("speed_tier", None)
+                connection.pop("speed_upstream_provider", None)
+                connection.pop("native_speed", None)
+                if legacy_direct:
+                    # The external provider survives removal. Keep its current
+                    # tier and retain the account snapshot for a later switch.
+                    self._model_settings(expected, connection, "api", LEGACY)
+                    if legacy_has_tier:
+                        expected["service_tier"] = legacy_tier
+                    else:
+                        expected.pop("service_tier", None)
 
                 def change(doc):
                     for name in MODEL_KEYS:
@@ -478,19 +588,21 @@ class SwitchService:
                             doc.pop(name, None)
                     if own is not None:
                         del doc["model_providers"][PROVIDER]
+                    doc.get("model_providers", {}).pop(SPEED_PROVIDER, None)
                     if "model_providers" in doc and not doc["model_providers"]:
                         # Materialize an empty parent; implicit TOML tables otherwise vanish.
                         doc["model_providers"] = {}
-                    if doc.get("model_provider") == PROVIDER:
+                    if doc.get("model_provider") in (PROVIDER, SPEED_PROVIDER):
                         doc["model_provider"] = "openai"
 
                 updated = patch(original, change)
                 if parse(updated) != expected:
                     raise SwitchError("Cannot safely remove the managed provider.")
-                for name in ("models", "catalog", "api_model", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
+                for name in ("models", "catalog", "api_model", "api_service_tier", "direct_speed_preference", "catalog_dirty", "models_provider", "catalog_provider", "metadata_status"):
                     connection.pop(name, None)
                 self._commit(original, updated, connection)
             self.credentials.delete()
+            token_service(self).credentials.delete()
 
     def credential(self):
         key = self.credentials.read()

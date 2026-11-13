@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import test_service
 from codex_switch.catalog import discover, endpoint, classification, enrich_models, make_catalog, model_info, official_metadata, bundled_metadata, merge_discovery
-from codex_switch.config import API_URL, PROVIDER, parse
+from codex_switch.config import API_URL, PROVIDER, parse, patch as patch_config
 from codex_switch.errors import SwitchError
 from codex_switch.settings import read_state, write_state
 
@@ -141,6 +141,47 @@ class GatewayTests(unittest.TestCase):
             with patch("codex_switch.service.discover", side_effect=rotate):
                 with self.assertRaises(SwitchError): self.service.sync_models()
         self.assertEqual(read_state(self.home), {})
+    def test_speed_preferences_roundtrip_without_enabling_or_leaking_tiers(self):
+        self.write_config(b'model="account-model"\nservice_tier="ultrafast"\n[features]\nfast_mode=false\n')
+        self.service.setup("fixture")
+        native = model_info("gpt-test", 200000)
+        native["service_tiers"] = [{"id": "priority", "name": "Fast"}]
+        values = [{"id": name, "enabled": False, "context_window": 32768, "reasoning": [],
+                   "images": False, "status": "unverified"} for name in ("gpt-test", "gateway-basic")]
+        with patch("codex_switch.service.discover", return_value=values), patch("codex_switch.service.official_metadata", return_value=({"gpt-test": native}, "available")):
+            self.service.sync_models()
+        self.service.apply_models("gpt-test", selected=["gpt-test", "gateway-basic"], activate=True)
+        self.assertIsNone(self.service.status()["configured_service_tier"])
+        self.assertEqual(self.service.status()["catalog_service_tiers"], ["priority"])
+        self.assertFalse(self.service.status()["configured_fast_mode"])
+        self.assertEqual(self.service.status()["speed_verification"], "not_verified")
+        # An explicit user/CLI choice, not an automatically enabled premium tier.
+        self.write_config(patch_config(self.service.config.read(), lambda d: d.update(service_tier="fast")))
+        self.service.use("account")
+        self.assertEqual(self.service.status()["configured_service_tier"], "ultrafast")
+        self.service.use("api")
+        self.assertEqual(self.service.status()["configured_service_tier"], "fast")
+        self.service.apply_models("gateway-basic", selected=["gpt-test", "gateway-basic"], activate=True)
+        self.assertIsNone(self.service.status()["configured_service_tier"])
+        self.assertEqual(self.service.status()["catalog_service_tiers"], [])
+        self.service.use("account")
+        self.assertEqual(self.service.status()["configured_service_tier"], "ultrafast")
+        self.service.use("api")
+        self.assertIsNone(self.service.status()["configured_service_tier"])
+        self.service.setup("rotated-fixture")
+        self.assertNotIn("api_service_tier", read_state(self.home))
+
+    def test_speed_diagnostics_read_configured_catalog_not_saved_draft(self):
+        self.write_config(b'model="gpt-test"\n')
+        catalog = self.home / "external.json"
+        catalog.write_text(json.dumps({"models": [{"slug": "gpt-test", "service_tiers": [{"id": "fast"}]}]}))
+        write_state(self.home, {"catalog": str(catalog)})
+        self.assertEqual(self.service.status()["catalog_service_tiers"], [])
+        self.write_config(('model="gpt-test"\nmodel_catalog_json=' + json.dumps(str(catalog)) + '\n').encode())
+        self.assertEqual(self.service.status()["catalog_service_tiers"], ["fast"])
+        catalog.write_text('{"models":null}')
+        self.assertEqual(self.service.status()["catalog_service_tiers"], [])
+
     def test_gateway_catalog_roundtrip_and_reapply_restore_account(self):
         original = b'model="account-model"\nservice_tier="priority"\nmodel_reasoning_effort="xhigh"\nmodel_catalog_json="account.json"\n[mcp_servers.keep]\ncommand="keep"\n'
         self.write_config(original)

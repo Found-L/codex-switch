@@ -4,6 +4,7 @@ The desktop distributions bundle CPython, tomlkit, PySide6 Essentials, shiboken6
 
 - CPython 3.14: Python Software Foundation License Version 2; https://docs.python.org/3/license.html
 - tomlkit 0.15.2: MIT; https://github.com/python-poetry/tomlkit/blob/main/LICENSE
+- websocket-client 1.9.0: Apache-2.0; https://github.com/websocket-client/websocket-client/blob/v1.9.0/LICENSE
 - PySide6 Essentials and shiboken6 6.12.0: used under GNU LGPL version 3; https://code.qt.io/cgit/pyside/pyside-setup.git/tree/?h=v6.12.0
 - Qt 6.12.0 libraries: used under GNU LGPL version 3; https://code.qt.io/cgit/qt/qtbase.git/tree/?h=v6.12.0 and https://code.qt.io/cgit/qt/qtdeclarative.git/tree/?h=v6.12.0
 - PyInstaller 6.22.3: GPL-2.0-or-later with bootloader exception permitting distribution of bundled applications under their own license; https://pyinstaller.org/en/stable/license.html

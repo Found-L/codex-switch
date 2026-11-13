@@ -1,5 +1,6 @@
 """Render the isolated QML scene offscreen; never capture the user's desktop."""
 from pathlib import Path
+import os
 import sys
 import tempfile
 
@@ -29,12 +30,31 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-render-") as home:
     service = SwitchService(Path(home), credentials=FixtureCredentials(), track=False)
     service.setup("render-fixture-not-real")
     service.use("api")
+    from codex_switch.config import patch as config_patch
+    service.config.path.write_bytes(config_patch(service.config.read(), lambda d: d.update(model="gpt-6.1-sol")))
     bridge = Bridge(service, testing=True)
     engine, window = load_scene(bridge)
     window.show()
     settle()
     if not window.grabWindow().save(str(destination / "overview.png")):
         raise SystemExit("Offscreen image could not be saved.")
+    window.setProperty("showSpeedHelp", True)
+    settle()
+    window.grabWindow().save(str(destination / "speed-help.png"))
+    bridge.toggleLanguage()
+    settle()
+    window.grabWindow().save(str(destination / "speed-help-en.png"))
+    bridge.toggleLanguage()
+    from codex_switch.native import runtime_path
+    from codex_switch.settings import atomic_json
+    atomic_json(runtime_path(service), {"phase": "waiting_for_exit", "host_pid": os.getpid()})
+    bridge.refresh()
+    settle()
+    window.grabWindow().save(str(destination / "speed-waiting.png"))
+    runtime_path(service).unlink()
+    bridge.refresh()
+    settle()
+    window.setProperty("showSpeedHelp", False)
     bridge.openPage.emit("key")
     settle()
     window.grabWindow().save(str(destination / "key.png"))

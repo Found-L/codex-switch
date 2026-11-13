@@ -1,5 +1,7 @@
 # Codex Switch
 
+Missing Fast / Ultrafast controls? In version 0.8.4, open **API configuration → API speed** or **Connection → Fast / Ultrafast**, then click **Enable Codex Fast / Ultrafast**. Fully quit Codex; Switch reopens it with the in-memory adapter and reports waiting, loading or failure. Native activation preserves the original direct OpenAI API provider for existing API chats. Provider-changing fallback relay buttons have been removed from the normal UI. Supported Windows Codex builds: 26.1029.7803.0, 26.1103.3517.0 and 26.1106.6628.0. Account speed remains under Codex's control. See [speed settings and compatibility](docs/speed-modes.md).
+
 English · [简体中文](README.md)
 
 A Windows/macOS app and CLI for switching Codex between an existing account login and an API connection, including official OpenAI, DeepSeek and Responses-compatible New API gateways.

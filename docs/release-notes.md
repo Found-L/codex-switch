@@ -1,3 +1,41 @@
+## Codex Switch v0.8.4
+
+- 修复普通速度按钮启用备用转发后，提供商变为 `codex_switch_speed`、已有 OpenAI API 会话报「模型提供商不匹配」的问题。普通界面移除转发选速按钮，原生启用保留原有 API 提供商。
+- 原生启用支持等待 Codex 完全退出后自动启动一次，可取消等待；切换账号或提供商后取消待执行的启动。
+- 显示等待、启动、模块已加载和失败等实际状态。后台适配进程结束后，旧记录不再显示为已加载；模块未完整加载会报告失败。
+- 优化原生资源检查，保留全部固定哈希校验，减少启用前的等待。
+- 隔离的真实 Codex 26.1106.6628.0 进程已观察到四类模块实际被拦截，未发送付费请求；现有用户窗口的菜单显示仍需启用后确认。
+
+Preserve the existing API provider, remove confusing relay speed buttons, and queue native activation until Codex exits. Show live adapter process state and stop treating old records as loaded modules.
+
+## Codex Switch v0.8.3
+
+- 补齐 Windows Codex 26.1106.6628.0 的 API 原生速度适配，核对 16 个相关资源的固定哈希；保留此前两个版本的兼容性。
+- 「API 配置」页新增明确的「API 速度 · Standard / Fast / Ultrafast」入口，连接页入口也直接显示 Fast / Ultrafast。
+- 原生速度仍需先完全退出 Codex，再通过 Switch 的原生速度按钮启动；普通启动不会启用内存适配。账号速度继续由 Codex 管理。
+
+Support the pinned Windows Codex 26.1106.6628.0 resources and make API speed controls accessible from the API configuration page. Native menu visibility requires launching Codex through the adapter.
+
+## Codex Switch v0.8.2
+
+- 账号模式不显示 Switch 速度入口，继续由 Codex 原生界面管理账号速度；API 模式提供原生速度启动入口。
+- 原生启动等待所有必需模块加载完成，连接窗口后发生的加载错误不再被当作成功；模块加载成功仍不代表菜单和实际 API 权限已验证。
+- 修复直连 API 未配置模型目录时，账号与 API 的速度设置互相串用；显式设置的 API 档位只在模型支持且匹配时恢复。切回账号恢复原有值，不自动启用加价档位。
+- 明确提示需先完全退出 Codex，再从 Switch 启动原生 API 速度适配；选择速度仍在 Codex 模型菜单中完成。
+
+Keep account speed in Codex, isolate account/API tiers without a catalog, and wait for native adapter modules before reporting startup. A live menu and paid API entitlement remain unverified.
+
+## Codex Switch v0.8.1
+
+- 实验性原生速度菜单适配 Windows Codex 26.1103.3517.0，补齐 API 速度读取及会话提交检查；新版相关客户端资源均核对固定哈希。
+- 重载桌面时忽略无关网络通知，避免适配器事件队列溢出。模型档位、工作区限制和服务端授权继续各自生效。
+- 等待 Codex 首次页面加载完成后再重载并启用适配，避免打断桌面启动；已在隔离的 Codex 进程验证四个目标模块均被接入。
+- 在完整和迷你面板的标题旁显示当前版本号，便于确认安装是否成功。
+- 速度设置面板直接显示启动失败和操作结果，避免提示被面板遮住。
+- 通过隔离单元测试、安装包模块模拟与本机后端的 Standard / Fast / Ultrafast 请求检查；未调用付费 API。真实桌面菜单和实际计费仍待用户重启后验收。
+
+Add experimental native speed support for the verified Windows Codex build, including its session tier checks. Local fixture tests pass; live desktop and billing remain unverified.
+
 ## Codex Switch v0.6.0
 
 - 模型页新增「状态对照」，分别显示全局配置、已保存目录、编辑草稿及独立的运行检查；明确配置差异不等于正在运行的会话异常。

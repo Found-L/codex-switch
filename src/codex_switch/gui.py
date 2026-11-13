@@ -120,6 +120,11 @@ class Bridge(QObject):
     def runtimeState(self):
         return self._runtime
 
+    @Property(str, notify=stateChanged)
+    def nativeError(self):
+        message = self._state.get("native_runtime", {}).get("message")
+        return self._safe_error(SwitchError(message)) if message else ""
+
     @Slot()
     def inspectRuntime(self):
         from .runtime import inspect_runtime
@@ -188,6 +193,22 @@ class Bridge(QObject):
             "Enable at least one coding model before applying the catalog.": "请先勾选至少一个编程模型，再应用目录。",
             "Choose an enabled model as the default.": "请先启用并保存当前模型，再将它设为默认模型。",
             "Connection changed during synchronization. Retry.": "同步期间连接发生变化，请重新同步。",
+            "The selected profile overrides the speed tier. Remove this override before switching to API.": "当前 profile 覆盖了速度档位，请先移除覆盖，再切换到 API。",
+            "Fully quit Codex first, then launch native speed mode from Codex Switch. Running chats are not closed automatically.": "请先完全退出 Codex，再从 Switch 启动原生速度模式；程序不会自动关闭正在运行的会话。",
+            "Restore the direct API connection before enabling native speed mode.": "请先点击「恢复直连」，再启动原生速度模式。",
+            "This Codex version has not been adapted. Native mode was not enabled.": "当前 Codex 版本尚未适配，未启用原生模式。",
+            "Native speed signatures changed; the installed client was not modified.": "Codex 速度模块的结构已变化，未修改已安装的客户端。",
+            "Native client resource changed; the adapter stopped without modifying installed files.": "Codex 客户端资源校验未通过，已停止适配；未修改已安装的文件。",
+            "Codex closed before the native speed adapter finished loading.": "Codex 在速度适配加载完成前已关闭。",
+            "Native speed modules were not confirmed. Check native status before retrying; no running chat was closed.": "未确认速度模块加载完成；请检查原生状态后重试。没有自动关闭任何会话。",
+            "This Codex build has no complete supported native speed adapter.": "当前 Codex 安装缺少已验证的适配资源，未启用原生模式。",
+            "Native speed currently requires a ready direct OpenAI API connection without profile overrides.": "原生速度目前需要已配置好的 OpenAI 直连，且不能被 profile 覆盖。",
+            "Sync and apply a catalog containing the current model before using native speed.": "请先同步并应用包含当前模型的目录，再启用原生速度。",
+            "Fully quit Codex before disabling the running native adapter.": "请先完全退出 Codex，再撤销正在运行的原生适配。",
+            "Native launch timed out while waiting for Codex to quit. Enable it again when ready.": "等待 Codex 退出已超时，请准备好后重新点击启用。",
+            "Codex changed while waiting. Enable native speeds again for the current version.": "等待期间 Codex 已更新，请重新启用当前版本的原生速度。",
+            "Native speed modules did not finish loading. Enable the adapter again after quitting Codex.": "原生速度模块未加载完整，请完全退出 Codex 后重新启用。",
+            "Native runtime adaptation failed. Close Codex to remove the session adapter.": "原生速度加载失败，请完全退出 Codex 后重新启用。",
             "The model list or settings changed. Apply the updated catalog before switching to API.": "模型名单或设置有待应用的更改，请先应用目录，再切到 API。",
             "Context window must be an integer.": "上下文长度必须填写整数。",
             "Context window must be between 4096 and 4000000 tokens.": "上下文长度须在 4096 到 4000000 tokens 之间。",
@@ -270,6 +291,19 @@ class Bridge(QObject):
             self._set_notice(self.tr_text("已撤销自定义模型目录，API 配置仍保留。请完全退出并重启 Codex。", "Custom catalog reset. API connection retained. Fully quit and restart Codex."))
         elif result["kind"] == "install-cli":
             self._set_notice(self.tr_text("终端命令已安装，请重新打开终端。", "Terminal command installed. Open a new terminal."))
+        elif result["kind"] == "speed":
+            self._set_notice(self.tr_text("已恢复 OpenAI API 直连。请完全退出并重启 Codex，以加载原有 API 提供商。", "Direct OpenAI API restored. Fully quit and restart Codex to load the original API provider."))
+        elif result["kind"] == "native":
+            if (result.get("output") or {}).get("phase") == "waiting_for_exit":
+                self._set_notice(self.tr_text("已安排。请完全退出 Codex，Switch 将自动重开并加载原生速度菜单。", "Ready. Fully quit Codex; Switch will reopen it with the native speed adapter."))
+            elif (result.get("output") or {}).get("phase") == "active":
+                self._set_notice(self.tr_text("适配模块已加载。请在 Codex 中选择速度；菜单显示和 API 权限仍需验证。", "Adapter modules loaded. Choose a speed in Codex; the menu and API entitlement still require verification."))
+            else:
+                self._set_notice(self.tr_text("正在启动 Codex，速度模块的加载结果会自动更新。", "Starting Codex. The speed module status will update automatically."))
+        elif result["kind"] == "native-cancel":
+            self._set_notice(self.tr_text("已取消等待启动。", "Pending native launch cancelled."))
+        elif result["kind"] == "native-off":
+            self._set_notice(self.tr_text("原生目录已恢复，请正常打开 Codex。", "Native catalog restored. Open Codex normally."))
         if self._quit_when_idle:
             self.quitApp()
 
@@ -352,6 +386,29 @@ class Bridge(QObject):
     @Slot()
     def refresh(self):
         self._submit(lambda: None, "refresh")
+
+    @Slot()
+    def restoreDirect(self):
+        from .speed import select
+        self._submit(lambda: select(self.service, "off"), "speed")
+
+    @Slot()
+    def launchNative(self):
+        from .native import launch
+        self._submit(lambda: launch(self.service), "native")
+
+    @Slot()
+    def cancelNative(self):
+        from .native import cancel_launch
+        self._submit(lambda: cancel_launch(self.service), "native-cancel")
+
+    @Slot()
+    def disableNative(self):
+        from .native import installation, require_closed, restore
+        def disable():
+            require_closed(installation(strict=False))
+            restore(self.service)
+        self._submit(disable, "native-off")
 
     def _refresh_if_visible(self):
         if self.window and self.window.isVisible() and not self._busy:
@@ -620,6 +677,9 @@ def self_test(report, native=False):
             objects = {name: window.findChild(QObject, name) for name in names}
             if not all(objects.values()):
                 raise RuntimeError("Required persistent controls are missing.")
+            version_label = window.findChild(QObject, "versionLabel")
+            if version_label is None or not version_label.property("visible") or version_label.property("text") != "v" + __version__:
+                raise RuntimeError("The full panel must show the current version.")
             if window.findChild(QObject, "modelField") is not None:
                 raise RuntimeError("Model selection must remain in Codex.")
             model.openPage.emit("models")
@@ -635,12 +695,12 @@ def self_test(report, native=False):
                 loop = QEventLoop()
                 timer = QTimer()
                 timer.setInterval(10)
-                timer.timeout.connect(lambda: loop.quit() if not model.busy else None)
+                timer.timeout.connect(lambda: loop.quit() if not model.busy and not model._refreshing else None)
                 QTimer.singleShot(8000, loop.quit)
                 timer.start()
                 loop.exec()
                 timer.stop()
-                if model.busy or model.isError:
+                if model.busy or model._refreshing or model.isError:
                     raise RuntimeError("Asynchronous UI operation did not complete.")
 
             phase = "setup-and-switch"
@@ -650,11 +710,97 @@ def self_test(report, native=False):
             model.switchTo("account")
             wait_idle()
             if model.state["mode"] != "account": raise RuntimeError("Account switch did not complete.")
+            if window.findChild(QObject, "apiSpeedEntry").property("visible"):
+                raise RuntimeError("Account mode must not expose the API speed entry.")
+            window.setProperty("page", "key")
+            loop = QEventLoop()
+            QTimer.singleShot(220, loop.quit)
+            loop.exec()
+            key_speed_entry = window.findChild(QObject, "apiKeySpeedEntry")
+            if key_speed_entry is None or key_speed_entry.property("visible"):
+                raise RuntimeError("Account mode must not expose API speed controls on the API configuration page.")
+            window.setProperty("showSpeedHelp", True)
+            app.processEvents()
+            if window.findChild(QObject, "speedHelpPanel").property("visible"):
+                raise RuntimeError("Account mode must not expose API speed controls.")
+            window.setProperty("showSpeedHelp", False)
             model.switchTo("api")
             wait_idle()
             for name, original in objects.items():
                 if window.findChild(QObject, name) is not original:
                     raise RuntimeError("A state update rebuilt the scene.")
+            phase = "speed-help"
+            unchanged = service.config.read()
+            if not key_speed_entry.property("visible") or "Fast / Ultrafast" not in key_speed_entry.property("text"):
+                raise RuntimeError("The API configuration page must show the Fast / Ultrafast entry.")
+            QMetaObject.invokeMethod(key_speed_entry, "clicked", Qt.DirectConnection)
+            app.processEvents()
+            if not window.findChild(QObject, "speedHelpPanel").property("visible"):
+                raise RuntimeError("The API configuration speed entry did not open the speed controls.")
+            if window.findChild(QObject, "speedOptionsRow") is not None or hasattr(model, "selectSpeed"):
+                raise RuntimeError("The native speed panel must not expose provider-changing relay controls.")
+            if window.findChild(QObject, "nativeTierLocation") is None:
+                raise RuntimeError("The native speed panel must explain where to choose a speed.")
+            help_text = window.findChild(QObject, "speedHelpText").property("text")
+            if "Ultrafast" not in help_text or service.config.read() != unchanged:
+                raise RuntimeError("Opening the speed panel must not change configuration.")
+            model._set_notice("Native startup fixture error", True)
+            app.processEvents()
+            speed_notice = window.findChild(QObject, "speedNotice")
+            if speed_notice is None or not speed_notice.property("visible") or speed_notice.property("text") != model.notice:
+                raise RuntimeError("Speed panel must show startup errors above its controls.")
+            model.clearNotice()
+            window.setProperty("showSpeedHelp", False)
+            app.processEvents()
+            phase = "native-speed-entry"
+            from unittest.mock import patch as mock_patch
+            from .config import patch as config_patch
+            service.config.path.write_bytes(config_patch(service.config.read(), lambda d: d.update(model="gpt-6.1-sol")))
+            model.refresh()
+            while model._refreshing:
+                app.processEvents()
+            from .native import runtime_path
+            from .settings import atomic_json
+            unchanged_provider = model.state["provider"]
+            def queue_native(current_service):
+                record = {"phase": "waiting_for_exit", "host_pid": os.getpid()}
+                atomic_json(runtime_path(current_service), record)
+                return record
+            with mock_patch("codex_switch.native.launch", side_effect=queue_native) as native_launch:
+                model.launchNative()
+                wait_idle()
+                native_launch.assert_called_once_with(service)
+            app.processEvents()
+            if not window.property("nativeWaiting") or "退出" not in model.notice:
+                raise RuntimeError("The UI must show that native launch is waiting for Codex to exit.")
+            if model.state["provider"] != unchanged_provider or model.state["speed_enabled"]:
+                raise RuntimeError("Native menu activation must keep the existing API provider.")
+            def cancel_native(current_service):
+                atomic_json(runtime_path(current_service), {"phase": "cancelled"})
+            with mock_patch("codex_switch.native.cancel_launch", side_effect=cancel_native) as native_cancel:
+                model.cancelNative()
+                wait_idle()
+                native_cancel.assert_called_once_with(service)
+            app.processEvents()
+            if window.property("nativeWaiting"):
+                raise RuntimeError("Cancelling the native launch must clear the waiting state.")
+            from .native import prepare as prepare_native
+            from .catalog import model_info
+            with mock_patch("codex_switch.native.bundled_metadata", return_value={"gpt-6.1-sol": model_info("gpt-6.1-sol", 32768)}):
+                prepare_native(service)
+            model.refresh()
+            wait_idle()
+            app.processEvents()
+            if not model.state["native_speed_saved"] or model.state["provider"] != unchanged_provider:
+                raise RuntimeError("Preparing a native catalog must retain the API provider.")
+            with mock_patch("codex_switch.native.installation", return_value={}), mock_patch("codex_switch.native.require_closed"):
+                model.disableNative()
+                wait_idle()
+            if model.state["native_speed_saved"]:
+                raise RuntimeError("Native catalog was not restored through the UI.")
+            service.config.path.write_bytes(unchanged)
+            model.refresh()
+            model.clearNotice()
             phase = "page-transitions"
             for page in ("key", "models", "terminal", "connections"):
                 samples = []
@@ -675,6 +821,8 @@ def self_test(report, native=False):
             app.processEvents()
             if window.width() != 372 or window.height() != 302:
                 raise RuntimeError("Mini window geometry is incorrect.")
+            if not version_label.property("visible") or version_label.property("text") != "v" + __version__:
+                raise RuntimeError("The mini panel must show the current version.")
             if "model" in __import__("tomllib").loads(service.config.read().decode()):
                 raise RuntimeError("Setup unexpectedly wrote a model.")
             model.toggleCompact()
@@ -782,6 +930,12 @@ def self_test(report, native=False):
             result = {"ok": True, "version": __version__, "qt": pyside_version,
                       "persistent_controls": True, "async_switching": True,
                       "page_transition_no_overlap": True,
+                      "speed_help_read_only": True,
+                      "api_config_speed_entry": True,
+                      "native_launch_queue": True,
+                      "native_provider_preserved": True,
+                      "native_speed_entry": True,
+                      "version_visible": True,
                       "native_keychain": native,
                       "gateway_catalog_flow": True, "search_multi_select": True, "state_comparison": True,
                       "empty_model_guidance": True, "notice_no_overlap": True,
@@ -793,6 +947,9 @@ def self_test(report, native=False):
             app.processEvents()
             model = None
     except Exception as error:
+        if os.environ.get("CODEX_SWITCH_DEBUG_SELFTEST") == "1":
+            import traceback
+            traceback.print_exc()
         result = {"ok": False, "error_type": type(error).__name__, "phase": phase}
     finally:
         if model:

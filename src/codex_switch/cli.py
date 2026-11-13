@@ -24,6 +24,11 @@ def main(argv=None):
     for command in ("status", "doctor"):
         commands.add_parser(command).add_argument("--json", action="store_true")
     commands.add_parser("runtime", help="Read an existing local server's catalog; never start a model turn")
+    commands.add_parser("speed", help="Opt-in loopback speed relay; select a tier, or off to restore direct API").add_argument("tier", choices=("default", "fast", "ultrafast", "off"))
+    commands.add_parser("speed-credential", help=argparse.SUPPRESS)
+    commands.add_parser("speed-relay", help=argparse.SUPPRESS).add_argument("--port", type=int, default=0)
+    commands.add_parser("native", help="Experimental native speed menu adapter; waits for Codex to quit").add_argument("action", choices=("inspect", "launch", "status", "cancel", "off"))
+    commands.add_parser("native-host", help=argparse.SUPPRESS).add_argument("--nonce", required=True)
     commands.add_parser("use").add_argument("mode", choices=("api", "account"))
     for mode in ("api", "account"):
         commands.add_parser(mode, help="Shortcut for use " + mode)
@@ -101,6 +106,36 @@ def main(argv=None):
                 SwitchService(home).remove_api()
             return 0
         service = SwitchService(args.codex_home)
+        if args.command in ("native", "native-host"):
+            from . import native
+            if args.command == "native-host":
+                native.host(service, args.nonce)
+            elif args.action == "inspect":
+                print(json.dumps(native.report(service), ensure_ascii=False))
+            elif args.action == "launch":
+                print(json.dumps(native.launch(service), ensure_ascii=False))
+            elif args.action == "off":
+                native.require_closed(native.installation(strict=False))
+                native.restore(service)
+                print("Native catalog restored. Open Codex normally to use the original client.")
+            elif args.action == "cancel":
+                native.cancel_launch(service)
+                print("Pending native launch cancelled. Running chats were not closed.")
+            else:
+                print(json.dumps(native.runtime_status(service), ensure_ascii=False))
+            return 0
+        if args.command in ("speed", "speed-credential", "speed-relay"):
+            from . import speed
+            if args.command == "speed-relay":
+                speed.serve(service, args.port)
+            elif args.command == "speed-credential":
+                if sys.stdout.isatty():
+                    raise SwitchError("Internal credential protocol requires redirected output.")
+                print(speed.credential(service), flush=True)
+            else:
+                speed.select(service, args.tier)
+                print("Speed route configured. First enable/off requires a fresh Codex process to load the connection. Tier changes affect subsequent relay requests. Higher tiers increase API charges; actual processing is not yet verified.")
+            return 0
         if args.command == "runtime":
             from .runtime import inspect_runtime
             print(json.dumps(inspect_runtime(service.home), ensure_ascii=False, indent=2))
@@ -152,6 +187,12 @@ def main(argv=None):
                 print("Current configuration: " + result["mode"] + " (" + result["provider"] + ")")
                 print("API configured: " + ("yes" if result["api_ready"] else "no"))
                 print("Codex home: " + result["codex_home"])
+                print("Configured speed tier: " + str(result["configured_service_tier"] or "unspecified (not proof of Standard)"))
+                print("Catalog speed tiers: " + (", ".join(result["catalog_service_tiers"]) or "unknown / not declared"))
+                if result["mode"] == "api":
+                    print("Speed: API support does not imply desktop menu access. Some desktop builds hide speed controls for API authentication; fast_mode=true cannot bypass that gate.")
+                print("Actual request speed/billing: not verified.")
+                print("Local speed relay: " + (result["speed_tier"] if result["speed_enabled"] else "off"))
                 if result["profile_override"]:
                     print("Warning: selected profile overrides model_provider.")
                 if args.command == "doctor":

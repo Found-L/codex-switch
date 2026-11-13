@@ -8,10 +8,11 @@ import unittest
 from unittest.mock import patch as mock_patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from codex_switch.config import API_URL, PROVIDER, parse
+from codex_switch.config import API_URL, PROVIDER, parse, patch as patch_config
 from codex_switch.credentials import default_credentials, target_for
 from codex_switch.errors import SwitchError
 from codex_switch.service import SwitchService, helper_command
+from codex_switch.settings import read_state, write_state
 
 
 class MemoryCredentials:
@@ -89,6 +90,55 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.credentials.read(), "old-fixture")
         self.assertFalse(self.service.config.path.exists())
 
+    def test_direct_api_without_catalog_keeps_account_and_api_speed_separate(self):
+        self.write_config(b'model="gpt-6.1-sol"\nservice_tier="ultrafast"\n')
+        self.service.setup("fixture")
+        self.service.use("api")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "default")
+        self.write_config(patch_config(self.service.config.read(), lambda d: d.update(service_tier="fast")))
+        self.service.use("account")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "ultrafast")
+        self.service.use("api")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "fast")
+        self.service.use("account")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "ultrafast")
+        self.write_config(patch_config(self.service.config.read(), lambda d: d.update(model="unverified-model")))
+        self.service.use("api")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "default")
+        self.service.use("account")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "ultrafast")
+
+    def test_direct_api_key_rotation_and_reset_do_not_apply_account_speed(self):
+        self.write_config(b'model="gpt-6.1-sol"\nservice_tier="ultrafast"\n')
+        self.service.setup("fixture")
+        self.service.use("api")
+        self.service.setup("rotated-fixture")
+        self.assertEqual(self.service.status()["mode"], "api")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "default")
+        self.service.reset_models()
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "default")
+        self.service.use("account")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "ultrafast")
+
+    def test_old_ambiguous_speed_state_does_not_enable_api_premium_tier(self):
+        self.write_config(b'model="gpt-6.1-sol"\nservice_tier="ultrafast"\n')
+        self.service.setup("fixture")
+        connection = read_state(self.home)
+        connection.update(api_model="gpt-6.1-sol", api_service_tier="ultrafast")
+        write_state(self.home, connection)
+        self.service.use("api")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "default")
+        self.service.use("account")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "ultrafast")
+
+    def test_direct_api_rejects_profile_speed_override(self):
+        self.write_config(b'profile="work"\n[profiles.work]\nservice_tier="ultrafast"\n')
+        self.service.setup("fixture")
+        before = self.service.config.read()
+        with self.assertRaises(SwitchError):
+            self.service.use("api")
+        self.assertEqual(self.service.config.read(), before)
+
     def test_new_credential_is_removed_on_config_failure(self):
         with mock_patch.object(self.service.config, "commit", side_effect=OSError()):
             with self.assertRaises(OSError):
@@ -104,6 +154,26 @@ class ServiceTests(unittest.TestCase):
         self.service.use("api")
         self.assertEqual(self.service.config.read(), raw)
         self.assertIsNone(self.credentials.read())
+
+    def test_saving_managed_key_leaves_existing_legacy_speed_untouched(self):
+        raw = ('model_provider="openai_api"\nservice_tier="ultrafast"\n[model_providers.openai_api]\n'
+               'base_url="' + API_URL + '"\nenv_key="EXTERNAL_FIXTURE"\n').encode()
+        self.write_config(raw)
+        self.service.setup("managed-fixture")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "ultrafast")
+        self.assertEqual(self.service.status()["provider"], "openai_api")
+
+    def test_removing_switch_keeps_legacy_api_speed_and_account_speed_separate(self):
+        raw = ('model="gpt-6.1-sol"\nservice_tier="ultrafast"\n[model_providers.openai_api]\n'
+               'base_url="' + API_URL + '"\nenv_key="EXTERNAL_FIXTURE"\n').encode()
+        self.write_config(raw)
+        self.service.use("api")
+        self.write_config(patch_config(self.service.config.read(), lambda d: d.update(service_tier="fast")))
+        self.service.remove_api()
+        config = parse(self.service.config.read())
+        self.assertEqual((config["model_provider"], config["service_tier"]), ("openai_api", "fast"))
+        self.service.use("account")
+        self.assertEqual(parse(self.service.config.read())["service_tier"], "ultrafast")
 
     def test_foreign_provider_collision_refuses_without_key_write(self):
         self.write_config(b'[model_providers.codex_switch_api]\nname = "Another app"\n')

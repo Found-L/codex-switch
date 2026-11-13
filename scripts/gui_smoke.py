@@ -20,5 +20,11 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-gui-report-") as temporary
     assert data["empty_model_guidance"] and data["notice_no_overlap"]
     assert data["search_multi_select"]
     assert data["state_comparison"]
+    assert data["speed_help_read_only"]
+    assert data["api_config_speed_entry"]
+    assert data["native_launch_queue"]
+    assert data["native_provider_preserved"]
+    assert data["native_speed_entry"]
+    assert data["version_visible"]
     assert data["native_keychain"] == native
     print("Packaged Qt " + data["qt"] + " GUI passed: persistent scene, async switching, mini window.")

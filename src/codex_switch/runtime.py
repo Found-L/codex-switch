@@ -1,3 +1,4 @@
+from . import __version__
 """Read an existing local server. Never launch a replacement or start a turn."""
 import json
 import os
@@ -57,7 +58,7 @@ def inspect_runtime(home):
                         raise ValueError()
                     return reply["result"]
 
-        request(1, "initialize", {"clientInfo": {"name": "codex_switch_status", "version": "0.6.0"}})
+        request(1, "initialize", {"clientInfo": {"name": "codex_switch_status", "version": __version__}})
         send({"method": "initialized"})
         result = request(2, "model/list", {"limit": 100})
         models = result.get("data", [])

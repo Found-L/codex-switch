@@ -15,11 +15,25 @@ Window {
     property string displayedPage: ""
     property bool sceneReady: false
     property bool showKey: false
+    property bool showSpeedHelp: false
+    onShowSpeedHelpChanged: { if (showSpeedHelp && bridge.compact) bridge.toggleCompact() }
     readonly property color accent: "#6055da"
     readonly property color ink: "#252938"
     readonly property color muted: "#858998"
     readonly property bool api: bridge.state.mode === "api"
+    onApiChanged: { if (!api) showSpeedHelp = false }
+    readonly property var nativeRuntime: bridge.state.native_runtime || {}
+    readonly property string nativePhase: nativeRuntime.phase || "not_started"
+    readonly property bool nativeWaiting: nativePhase === "waiting_for_exit"
+    readonly property bool nativeActive: nativePhase === "active" && nativeRuntime.host_alive === true
     function t(zh, en) { return bridge.language === "zh" ? zh : en }
+    function nativeStatusText() {
+        if (nativeWaiting) return t("已安排。现在完全退出 Codex，Switch 将自动重开并加载速度模块。", "Ready. Fully quit Codex now; Switch will reopen it with the speed adapter.")
+        if (nativeActive) return t("原生速度模块已加载。回到 Codex，在模型菜单中选择 Fast / Ultrafast。", "Native speed modules loaded. Choose Fast / Ultrafast in Codex's model menu.")
+        if (nativePhase === "starting" || nativePhase === "attached") return t("正在启动 Codex 并检查速度模块，请稍候。", "Starting Codex and checking speed modules. Please wait.")
+        if (nativePhase === "error") return t("启动失败：", "Startup failed: ") + (bridge.nativeError || t("请重新启用。", "Enable the adapter again."))
+        return t("原生速度尚未启用。点击上方按钮，再完全退出 Codex，Switch 会自动重开。", "Native speeds are not enabled. Click above, then fully quit Codex; Switch will reopen it.")
+    }
     Shortcut { sequence: bridge.isMac ? "Meta+M" : "Ctrl+M"; onActivated: bridge.hideToTray() }
     Shortcut { sequence: bridge.isMac ? "Meta+Shift+M" : "Ctrl+Shift+M"; onActivated: bridge.toggleCompact() }
     Shortcut { sequence: bridge.isMac ? "Meta+Q" : "Ctrl+Q"; onActivated: bridge.quitApp() }
@@ -199,7 +213,12 @@ Window {
         }
         MouseArea { x: 0; y: 0; width: parent.width; height: 76; onPressed: root.startSystemMove() }
         Image { x: 22; y: 20; width: 34; height: 34; source: bridge.logoUrl; smooth: true; mipmap: true }
-        Text { x: 66; y: 20; text: "Codex Switch"; color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold }
+        Text { id: appTitle; x: 66; y: 20; text: "Codex Switch"; color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold }
+        Rectangle {
+            anchors.left: appTitle.right; anchors.leftMargin: 8; anchors.verticalCenter: appTitle.verticalCenter
+            width: versionLabel.implicitWidth + 12; height: 18; radius: 9; color: "#ece9fc"
+            Text { id: versionLabel; objectName: "versionLabel"; anchors.centerIn: parent; text: "v" + bridge.version; color: "#6055da"; font.family: bridge.fontFamily; font.pixelSize: 11; font.weight: Font.DemiBold }
+        }
         Text { x: 66; y: 42; text: root.t("连接，随你切换", "Your connection, simply."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
         Row {
             anchors.right: parent.right; anchors.rightMargin: 19; y: 21; spacing: 3
@@ -241,6 +260,7 @@ Window {
                 Rectangle {
                     width: parent.width; height: 104; radius: 18; color: "white"; border.color: "#e4e6ef"
                     Text { x: 20; y: 18; text: root.t("当前连接配置", "CURRENT CONFIGURATION"); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10; font.letterSpacing: 0.4 }
+                    Text { objectName: "apiSpeedEntry"; visible: root.api; anchors.right: parent.right; anchors.rightMargin: 20; y: 18; text: "Fast / Ultrafast ↗"; color: root.accent; font.pixelSize: 11; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.showSpeedHelp = true } }
                     Text { x: 20; y: 43; text: root.api ? (bridge.state.api_label || "API") : bridge.state.mode === "other" ? root.t("其他提供商", "Other provider") : root.t("Codex 账号", "Codex account"); color: root.ink; font.family: bridge.fontFamily; font.pixelSize: 26; font.weight: Font.DemiBold }
                     Text { x: 20; y: 80; width: parent.width - 40; elide: Text.ElideRight; text: root.t("配置模型：", "Configured model: ") + (bridge.state.model || root.t("Codex 默认", "Codex default")); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 10 }
                 }
@@ -295,7 +315,8 @@ Window {
                 }
                 Text { y: 223; width: parent.width; text: bridge.isMac ? root.t("Key 保存在当前用户的 macOS 钥匙串中。", "Stored in your macOS login Keychain.") : root.t("Key 保存在当前 Windows 用户的凭据管理器中。", "Stored in Windows Credential Manager for your user."); color: root.muted; font.family: bridge.fontFamily; font.pixelSize: 11; wrapMode: Text.WordWrap }
                 SoftButton { y: 267; width: parent.width; primary: true; text: bridge.busy ? root.t("正在保存…", "Saving…") : root.t("保存 API 配置", "Save API connection"); enabled: !bridge.busy; onClicked: bridge.saveConnection(keyField.text, urlField.text) }
-                Text { y: 328; text: root.t("创建 OpenAI API Key ↗", "Create an OpenAI API key ↗"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("key") } }
+                Text { y: 244; text: root.t("创建 OpenAI API Key ↗", "Create an OpenAI API key ↗"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 11; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("key") } }
+                SoftButton { objectName: "apiKeySpeedEntry"; visible: root.api; y: 323; width: parent.width; height: 36; text: root.t("API 速度 · Standard / Fast / Ultrafast", "API speed · Standard / Fast / Ultrafast"); onClicked: root.showSpeedHelp = true }
                 Text { visible: false; y: 355; text: root.t("还没有 Codex？查看安装说明 ↗", "Need Codex? Open the installation guide ↗"); color: "#9a9fac"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.openLink("codex") } }
             }
 
@@ -340,7 +361,6 @@ Window {
             ConnectionPicker { y: 65; width: parent.width; mini: true }
             Text { y: 146; width: parent.width; text: bridge.busy ? root.t("正在保存…", "Saving…") : bridge.notice; color: bridge.isError ? "#bd5363" : "#4c9379"; font.family: bridge.fontFamily; font.pixelSize: 9; elide: Text.ElideRight }
             Text { y: 170; text: root.t("展开完整面板 ↗", "Open the full panel ↗"); color: root.accent; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.toggleCompact() } }
-            Text { y: 170; anchors.right: parent.right; text: "v" + bridge.version; color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
         }
 
         Text {
@@ -357,5 +377,48 @@ Window {
         }
         Text { visible: !bridge.compact; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: root.t("配置不代表已有会话；目录保存后需完全退出并重启 Codex。", "Config is not a running chat. Quit and restart Codex to load catalogs."); color: "#a2a6b1"; font.family: bridge.fontFamily; font.pixelSize: 9 }
         Text { visible: !bridge.compact; anchors.right: parent.right; anchors.rightMargin: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 20; text: bridge.language === "zh" ? "EN" : "中"; color: "#8c90a0"; font.family: bridge.fontFamily; font.pixelSize: 10; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: bridge.toggleLanguage() } }
+    }
+    Rectangle {
+        objectName: "speedHelpPanel"
+        anchors.fill: parent; anchors.margins: 12; radius: 24; z: 30
+        visible: root.showSpeedHelp && root.api
+        color: "#f7f8fc"
+        MouseArea { anchors.fill: parent }
+        Text { x: 24; y: 20; text: root.t("恢复 Codex 的 API 速度菜单", "Restore native API speeds"); color: root.ink; font.pixelSize: 19; font.weight: Font.DemiBold }
+        SoftButton { objectName: "nativeLaunchButton"; x: 24; y: 56; width: parent.width - 48; height: 40; text: bridge.busy ? root.t("正在检查并安排…", "Checking and preparing…") : root.nativeWaiting ? root.t("等待 Codex 退出…", "Waiting for Codex to quit…") : root.nativeActive ? root.t("原生速度模块已加载", "Native speed modules loaded") : root.t("启用 Codex 的 Fast / Ultrafast", "Enable Codex Fast / Ultrafast"); primary: true; enabled: !bridge.isMac && root.api && bridge.state.api_ready && bridge.state.base_url === "https://api.openai.com/v1" && !bridge.state.profile_override && !root.nativeWaiting && !root.nativeActive && root.nativePhase !== "starting" && root.nativePhase !== "attached" && !bridge.busy; onClicked: bridge.launchNative() }
+        Text { objectName: "nativeRuntimeText"; x: 24; y: 110; width: parent.width - 48; height: 64; wrapMode: Text.Wrap; text: root.nativeStatusText(); color: root.nativePhase === "error" ? "#bd5363" : root.nativeActive ? "#4c9379" : root.ink; font.pixelSize: 12; lineHeight: 1.2 }
+        Text { x: 24; y: 185; width: parent.width - 48; wrapMode: Text.Wrap; text: bridge.state.speed_enabled ? root.t("启用时会先恢复 OpenAI API 直连，修复原有 API 会话的提供商不匹配。", "Enabling restores direct OpenAI API first, resolving the provider mismatch in existing API chats.") : root.t("使用原有 OpenAI API 直连，保留已有 API 会话的提供商。", "Uses the original direct OpenAI API provider for existing API chats."); color: root.muted; font.pixelSize: 10 }
+        Text { x: 24; y: 222; width: parent.width - 48; text: root.t("适配版本：Codex 26.1106.6628.0（实验性）", "Codex 26.1106.6628.0 adapter (experimental)"); color: root.muted; font.pixelSize: 10 }
+        Rectangle {
+            x: 24; y: 250; width: parent.width - 48; height: 68; radius: 12; color: "white"; border.color: "#e4e6ef"
+            Text { x: 14; y: 12; text: "Standard · Fast · Ultrafast"; color: root.ink; font.pixelSize: 14; font.weight: Font.DemiBold }
+            Text { objectName: "nativeTierLocation"; x: 14; y: 39; width: parent.width - 28; text: root.t("启用后，在 Codex 的模型菜单中选择速度。", "After enabling, choose a speed in Codex's model menu."); color: root.muted; font.pixelSize: 10 }
+        }
+        ScrollView {
+            x: 24; y: 336; width: parent.width - 48; height: parent.height - (bridge.notice.length ? 460 : 424); clip: true
+            contentWidth: availableWidth
+            Text {
+                objectName: "speedHelpText"
+                width: parent.width; wrapMode: Text.Wrap; color: "#62677d"; font.family: bridge.fontFamily; font.pixelSize: 12; lineHeight: 1.35
+                text: root.t("配置模型：", "Configured model: ") + (bridge.state.model || "—")
+                    + "\n" + root.t("配置速度：", "Configured tier: ") + (bridge.state.configured_service_tier || root.t("未指定（不代表当前会话是 Standard）", "Unspecified (does not prove Standard)"))
+                    + "\n" + root.t("目录声明：", "Catalog declares: ") + ((bridge.state.catalog_service_tiers || []).join(", ") || root.t("未知 / 未声明", "Unknown / not declared"))
+                    + "\n\n" + root.t("Ultra 是推理强度；Fast / Ultrafast 是速度档位，互相独立。", "Ultra is reasoning effort. Fast / Ultrafast are independent speed tiers.")
+                    + "\n\n" + root.t("原生适配的本机调试端口可能被本机其他程序访问，请在可信设备使用；关闭 Codex 后结束。", "Other local programs may access the native adapter's debug port. Use on a trusted device; quit Codex to end the session.")
+                    + "\n\n" + root.t("普通启动不会加载内存适配。完全退出后，Switch 会自动启动一次；等待期间可点「取消等待」。", "A normal launch does not load the in-memory adapter. After you quit, Switch automatically launches Codex once. You can cancel while waiting.")
+                    + "\n\n" + root.t("Ultrafast 适配 gpt-6.1-sol / gpt-6-astra。Fast / Ultrafast 费用更高，实际可用性以 API 项目权限为准。", "Ultrafast is adapted for gpt-6.1-sol / gpt-6-astra. Fast / Ultrafast cost more; availability depends on API project access.")
+                    + "\n\n" + root.t("账号速度由 Codex 自己管理。API 模型目录未声明的档位不会自动恢复，也不会自动开启加价档位。", "Account speed is managed by Codex. Undeclared API tiers are not restored; premium tiers are never enabled automatically.")
+            }
+        }
+        Text {
+            objectName: "speedNotice"
+            x: 24; y: parent.height - 112; width: parent.width - 48; height: 32
+            visible: bridge.notice.length > 0
+            text: bridge.notice; color: bridge.isError ? "#bd5363" : "#4c9379"
+            font.family: bridge.fontFamily; font.pixelSize: 10
+            wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
+        }
+        SoftButton { objectName: "disableSpeedButton"; x: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 24; width: (parent.width - 54) / 2; text: root.nativeWaiting ? root.t("取消等待", "Cancel waiting") : bridge.state.native_speed_saved ? root.t("撤销原生适配", "Disable native") : root.t("恢复直连", "Restore direct API"); enabled: (root.nativeWaiting || bridge.state.speed_enabled || bridge.state.native_speed_saved) && !bridge.busy; onClicked: { if (root.nativeWaiting) bridge.cancelNative(); else if (bridge.state.native_speed_saved) bridge.disableNative(); else bridge.restoreDirect() } }
+        SoftButton { anchors.right: parent.right; anchors.rightMargin: 24; anchors.bottom: parent.bottom; anchors.bottomMargin: 24; width: (parent.width - 54) / 2; text: root.t("知道了", "Done"); onClicked: root.showSpeedHelp = false }
     }
 }

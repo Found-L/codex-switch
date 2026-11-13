@@ -13,7 +13,7 @@ if python_license is None:
 shutil.copyfile(python_license, destination / "PYTHON-LICENSE.txt")
 for file in (root / "third_party").glob("QT-*.txt"):
     shutil.copyfile(file, destination / file.name)
-for name in ("tomlkit", "pyinstaller", "PySide6-Essentials", "shiboken6"):
+for name in ("tomlkit", "pyinstaller", "PySide6-Essentials", "shiboken6", "websocket-client"):
     distribution = importlib.metadata.distribution(name)
     found = False
     for entry in distribution.files:

@@ -7,10 +7,12 @@ import sys
 import tempfile
 import tomllib
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from codex_switch.credentials import default_credentials
+from codex_switch.speed import health
 
 executable = Path(sys.argv[1]).resolve()
 with tempfile.TemporaryDirectory(prefix="codex-switch-smoke-") as temporary:
@@ -39,15 +41,35 @@ with tempfile.TemporaryDirectory(prefix="codex-switch-smoke-") as temporary:
         helper = subprocess.run([auth_config["command"], *auth_config["args"]],
                                 capture_output=True, text=True, encoding="utf-8", env=environment, timeout=30)
         assert helper.returncode == 0 and helper.stdout.strip() == "packaged-fixture-not-real"
-        assert parsed["model"] == "existing-model" and parsed["service_tier"] == "priority"
+        assert parsed["model"] == "existing-model" and parsed["service_tier"] == "default"
         call("use", "account")
         assert json.loads(call("status", "--json"))["mode"] == "account"
+        assert tomllib.loads((home / "config.toml").read_text("utf-8"))["service_tier"] == "priority"
         call("api")
         assert json.loads(call("status", "--json"))["mode"] == "api"
+        assert tomllib.loads((home / "config.toml").read_text("utf-8"))["service_tier"] == "default"
         for path in home.rglob("*"):
             if path.is_file():
                 assert b"packaged-fixture-not-real" not in path.read_bytes()
         assert auth.read_bytes() == b"account-sentinel"
+        # Start the packaged relay with fixture credentials, without model requests.
+        call("speed", "default")
+        relay_state = json.loads(call("status", "--json"))
+        assert relay_state["speed_enabled"] and relay_state["speed_route_configured"]
+        route = tomllib.loads((home / "config.toml").read_text("utf-8"))["model_providers"]["codex_switch_speed"]
+        local_auth = route["auth"]
+        local_helper = subprocess.run([local_auth["command"], *local_auth["args"]], capture_output=True,
+            text=True, encoding="utf-8", env=environment, timeout=30)
+        local_token = local_helper.stdout.strip()
+        assert local_helper.returncode == 0 and local_token and local_token != "packaged-fixture-not-real"
+        relay_runtime = json.loads((home / "codex-switch" / "speed-runtime.json").read_text("utf-8"))
+        assert health(relay_runtime["port"], local_token)
+        call("speed", "off")
+        assert not json.loads(call("status", "--json"))["speed_enabled"]
+        deadline = time.monotonic() + 35
+        while health(relay_runtime["port"], local_token) and time.monotonic() < deadline:
+            time.sleep(.25)
+        assert not health(relay_runtime["port"], local_token)
         requests = []
         class GatewayFixture(BaseHTTPRequestHandler):
             def do_GET(self):
